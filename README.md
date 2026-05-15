@@ -21,7 +21,7 @@ The mesh is the middle path:
 - **Goals in, audited outcomes out.** Users state intent; the mesh plans, validates, executes, and evaluates.
 - **Governance is first-class.** Policies are persisted objects, versioned, enforced either deterministically or by an agent, and can be authored in natural language.
 - **The orchestrator is the source of truth.** State transitions live in one place; executors and agents are stateless workers.
-- **Routines are data, not code.** Successful task patterns are captured as DB objects with manifests and can be recalled, pinned, updated, copied, deprecated, archived, or pruned.
+- **Routines are data, not code.** Successful task patterns are captured as DB objects with manifests. Operations (`create`, `recall`, `update`, `pin`, `copy`, `deprecate`, `archive`, `prune`) are separate from version status (`draft`, `candidate`, `active`, `deprecated`, `archived`, `pruned`); pinning is a scoped binding, not a status.
 - **Evaluator catches "wrong but schema-valid".** Schemas check shape; evaluator checks meaning.
 
 ---
@@ -64,11 +64,11 @@ V1 does **not** include: a web UI, a public marketplace of routines, fine-tuning
 
 ```mermaid
 flowchart TB
-    subgraph Entry["Entrypoints"]
+    subgraph Entry["Entrypoints (V1 enum: slack | api | mcp | internal)"]
         SLK[Slack App]
-        MCP[MCP Server<br/>external agents + loopback]
         API[REST API<br/>source of truth]
-        GQL[GraphQL<br/>optional / later]
+        MCP[MCP Server<br/>external agents + loopback]
+        GQL[GraphQL<br/>deferred post-V1]
     end
 
     subgraph Control["Control Plane"]
@@ -145,12 +145,17 @@ flowchart TB
 │   ├── tool-plans.md               # tool trust tiers, credentials, per-client packs
 │   ├── v1-dogfood-scenarios.md     # the three workflows + cross-cutting scenarios
 │   └── operations.md               # logging, monitoring, kill switch, DLQ
-└── examples/
-    ├── task.example.json           # a populated Task object
-    ├── policy.example.yaml         # a governance policy
-    ├── routine.example.yaml        # a persisted routine
-    ├── release-manifest.example.yaml
-    └── tool-plan.example.yaml
+├── examples/
+│   ├── task.example.json           # a populated Task object
+│   ├── policy.example.yaml         # a governance policy with evaluator options
+│   ├── routine.example.yaml        # a persisted routine + pin binding
+│   ├── criterion.example.yaml      # a proposed evaluator criterion
+│   ├── hitl-decision.example.json  # a human approval record
+│   ├── logs.example.json           # one entry per log stream
+│   ├── dedup-fingerprint.example.json
+│   ├── release-manifest.example.yaml
+│   └── tool-plan.example.yaml
+└── docs/proposals/                 # short proposals for cross-cutting changes
 ```
 
 ---

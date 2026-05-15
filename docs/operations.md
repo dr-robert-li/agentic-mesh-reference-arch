@@ -17,13 +17,38 @@ a frontend in V1, and how cost/quality are managed via the model cascade.
 
 Common fields across all logs: `entry_id` (ULID), `prev_entry_id` (forms a per-Task chain), `recommended_action` where applicable.
 
+One sample line from each stream is in [`examples/logs.example.json`](../examples/logs.example.json).
+
+### 1.0 Log / provenance flow
+
+```mermaid
+flowchart LR
+    EVT[Event log<br/>external triggers] --> ORCH[Orchestrator]
+    ORCH --> DEC[Decision log]
+    ORCH --> EXEC[Executor]
+    EXEC --> GW[Tool Gateway]
+    GW --> ACT[Action log]
+    ORCH --> VAL[Validator]
+    VAL --> VLOG[Validation log]
+    ORCH --> EV[Evaluator]
+    EV --> ELOG[Evaluation log]
+
+    DEC --> PROV[Task.provenance<br/>append-only refs]
+    ACT --> PROV
+    VLOG --> PROV
+    ELOG --> PROV
+    EVT --> PROV
+```
+
+Every log entry that needs to be re-surfaced to a human is referenced from `Task.provenance` by entry id.
+
 ### 1.1 Provenance fields surfaced for every human-facing notice
 
 When a Task surfaces something to a human — an approval request, a duplicate confirmation,
 an evaluator-proposed criterion — the message **must** include:
 
 - **Actor** (who initiated the underlying work)
-- **Entrypoint** (`slack`, `mcp`, `api`, `internal`)
+- **Entrypoint** (`slack`, `api`, `mcp`, `internal`)
 - **Timestamp** (ISO-8601 UTC, plus a localized form)
 - **Reason** (free text)
 - **Recommended action**

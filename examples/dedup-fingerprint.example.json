@@ -1,0 +1,31 @@
+{
+  "_comment": "Illustrative, not normative. The fingerprint computed for the example Task in task.example.json. See docs/orchestration.md §4. Stored in the per-tenant dedup_index for 24 hours.",
+  "fingerprint_id": "dfp_01HXYZDED00001",
+  "tenant_id": "tenant_acme",
+  "task_id": "task_01HXYZABCDEF0001",
+  "fingerprint_fields": [
+    "tenant_id",
+    "actor.id",
+    "entrypoint",
+    "normalized_goal",
+    "salient_inputs"
+  ],
+  "components": {
+    "actor_id": "U07ABC123",
+    "entrypoint": "slack",
+    "normalized_goal": "capture action items from tldv recording as monday task on board gtm pipeline",
+    "salient_inputs_hash": "sha256:b3f9...c41a",
+    "goal_embedding_quantized": "vec_q16:0x9c14...82f0"
+  },
+  "fingerprint": "sha256:5a8c...d2e7",
+  "similarity_threshold": 0.92,
+  "search_window_minutes": 15,
+  "suppression_window_hours": 24,
+  "eligible_candidate_states": ["RECEIVED", "DEDUPLICATING", "PLANNING", "POLICY_CHECK", "AWAITING_HITL", "EXECUTING", "EVALUATING", "SUCCEEDED", "SUPPRESSED", "AWAITING_DUP_CONFIRM"],
+  "ineligible_candidate_states": ["FAILED", "DENIED", "CANCELLED"],
+  "retention": {
+    "stored_at": "2026-05-15T10:33:00Z",
+    "expires_at": "2026-05-16T10:33:00Z",
+    "swept_by": "dedup_index_gc"
+  }
+}

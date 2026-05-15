@@ -13,6 +13,7 @@ intent: |
 enforcement_mode: hybrid
 
 # Deterministic prefilter — cheap, decides clear cases.
+# Trust tiers are an unordered enum; predicates use set membership, not ordinal comparison.
 rule:
   all_of:
     - field: tool_call.tool_id
@@ -41,6 +42,15 @@ hitl:
     initiated by ${actor.display_name} via ${entrypoint} at ${timestamp}.
     Proposed payload: ${payload_summary}
     Recommended action: ${recommended_action}
+
+# Evaluator-criteria options. Evaluator-generated criteria are proposals (status
+# `candidate`) until accepted by a human or by a policy authorized to auto-accept.
+# Auto-accepting Tasks do NOT pause for the proposal — see docs/task-contract.md §2.1.
+evaluator_options:
+  auto_accept_criteria: true   # canonical name; alias of auto_accept_evaluator_criteria
+  scope:
+    routine_refs: [rt_tldv_to_monday]
+    severity_at_most: degraded
 
 provenance:
   authored_by:

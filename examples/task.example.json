@@ -77,15 +77,24 @@
   ],
   "hitl": {
     "requested_at": "2026-05-15T10:34:12Z",
+    "from_state": "POLICY_CHECK",
     "reason": "Recording tagged 'external-customer' triggers policy P_external_customer_writes.",
     "approver": null,
     "decision": null,
     "decided_at": null,
     "channel": "slack:DM:U07PROJLEAD"
   },
+  "dedup": {
+    "fingerprint": "sha256:5a8c...d2e7",
+    "fingerprint_fields": ["tenant_id", "actor.id", "entrypoint", "normalized_goal", "salient_inputs"],
+    "candidate_task_ids": [],
+    "confirmed_duplicate_of": null,
+    "suppression_expires_at": null
+  },
   "provenance": [
     {"kind": "event", "ref": "evt_01HXYZ0001"},
     {"kind": "source_artifact", "ref": "tldv:example-recording-id"},
+    {"kind": "recalled_routine", "ref": "rt_tldv_to_monday@2"},
     {"kind": "policy_decision", "ref": "dec_01HXYZ0007"}
   ],
   "created_at": "2026-05-15T10:33:00Z",

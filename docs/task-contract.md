@@ -16,7 +16,7 @@ A Task is a record with the following fields. Field names are normative; types a
 | `parent_task_id` | no | If this is a subtask, the parent. Root tasks omit this. |
 | `root_task_id` | yes | The top-level ancestor. For roots, equals `task_id`. |
 | `tenant_id` | yes | Tenant scope. Every Task belongs to exactly one tenant. |
-| `entrypoint` | yes | One of `slack`, `mcp`, `api`, `graphql`, `internal` (loopback, scheduled, child task). |
+| `entrypoint` | yes | One of `slack`, `api`, `mcp`, `internal` (loopback, scheduled, child task). `graphql` is reserved for a future entrypoint and **not** valid in V1. See [architecture.md §2](architecture.md). |
 | `actor` | yes | Who initiated: human user ID, agent ID, or service ID. Includes display name and source-system identifier. |
 | `goal` | yes | Natural-language intent. Preserved verbatim. |
 | `inputs` | yes | Structured inputs (Slack message refs, URLs, file IDs, query params). |
@@ -54,14 +54,15 @@ stateDiagram-v2
     AWAITING_DUP_CONFIRM --> PLANNING
     AWAITING_DUP_CONFIRM --> SUPPRESSED
     PLANNING --> POLICY_CHECK
-    POLICY_CHECK --> AWAITING_HITL
+    POLICY_CHECK --> AWAITING_HITL : require_hitl
     POLICY_CHECK --> EXECUTING
     POLICY_CHECK --> DENIED
-    AWAITING_HITL --> EXECUTING
+    AWAITING_HITL --> POLICY_CHECK : resume (pre-execute gate)
+    AWAITING_HITL --> EXECUTING : resume (post-evaluate gate)
     AWAITING_HITL --> DENIED
     EXECUTING --> EVALUATING
     EVALUATING --> EXECUTING : retry / next wave
-    EVALUATING --> AWAITING_HITL : criterion proposed
+    EVALUATING --> AWAITING_HITL : policy requires HITL
     EVALUATING --> SUCCEEDED
     EVALUATING --> FAILED
     EXECUTING --> FAILED : poison-pill -> DLQ
@@ -77,12 +78,12 @@ State definitions:
 
 | State | Meaning | Terminal? |
 |-------|---------|-----------|
-| `RECEIVED` | Task created, not yet processed. | no |
-| `DEDUPLICATING` | Checking for duplicates in the 15-minute window. | no |
+| `RECEIVED` | The Orchestrator has accepted and persisted the Task from an entrypoint but has not yet begun any control-plane processing. This is the first state every Task occupies; it exists so the audit chain has a definite "task was created" anchor distinct from "deduplicating began". | no |
+| `DEDUPLICATING` | Checking for duplicates in the 15-minute window. See [orchestration.md §4](orchestration.md). | no |
 | `AWAITING_DUP_CONFIRM` | Probable duplicate; awaiting user confirmation. | no |
 | `PLANNING` | Planner/Decomposer is producing a plan. | no |
 | `POLICY_CHECK` | Governance evaluating; may transition to `AWAITING_HITL` or `DENIED`. | no |
-| `AWAITING_HITL` | Paused for human approval. | no |
+| `AWAITING_HITL` | Paused for human approval. Resumes to the state the gate fired from (`POLICY_CHECK` or `EVALUATING`), or transitions to `DENIED`. See §3. | no |
 | `EXECUTING` | A wave is running. | no |
 | `EVALUATING` | Evaluator scoring wave output. | no |
 | `SUCCEEDED` | Result available, validated, evaluated. | yes |
@@ -91,6 +92,19 @@ State definitions:
 | `CANCELLED` | Kill switch invoked or user cancellation. | yes |
 | `SUPPRESSED` | Duplicate detected and confirmed; suppressed for 24h. | yes |
 
+### 2.1 Evaluator-proposed criteria do not pause Tasks
+
+The `EVALUATING -> AWAITING_HITL` edge fires **only** when a governance policy attached
+to evaluation outcomes requires HITL (for example a `post_evaluation` trigger with
+`on_violation: require_hitl`, or a low-quality verdict policy).
+
+When an Evaluator merely **proposes a new criterion**, the criterion is written to the
+criteria store as a `proposed` review record **asynchronously**. The Task does not pause
+and does not transition. Proposed criteria are surfaced through the review channels
+described in [operations.md §2](operations.md) and accepted by a human or by a policy
+that authorizes auto-acceptance — see [evaluator.md §4](evaluator.md) and
+[governance.md §7](governance.md).
+
 ---
 
 ## 3. Transition rules
@@ -98,7 +112,7 @@ State definitions:
 1. **Single writer.** Only the Orchestrator transitions `state`. Any other writer is a bug.
 2. **Validator gate.** Before *and* after a transition, the Contract Validator checks the relevant subset of fields. Failures revert to the previous state with a Validation log entry.
 3. **Forward-only by default.** Re-entry into `EXECUTING` is allowed for retries and for the next wave; otherwise transitions are forward-only.
-4. **HITL is a pause, not a branch.** `AWAITING_HITL` can be reached from multiple states and returns to where the gate fired.
+4. **HITL is a pause, not a branch.** `AWAITING_HITL` can be reached from `POLICY_CHECK` (pre-execute gate) or `EVALUATING` (post-execute gate). On approve, the Task resumes to the state the gate fired from. On deny, the Task transitions to `DENIED`. The `hitl` block records `from_state` so the resume target is unambiguous.
 5. **Terminal states are immutable.** Once `SUCCEEDED`, `FAILED`, `DENIED`, `CANCELLED`, or `SUPPRESSED`, the Task is read-only. To "retry", create a child Task with provenance referencing the original.
 
 ---
@@ -130,6 +144,24 @@ This is what gives the no-frontend monitoring story (Slack/API/MCP) enough conte
 
 ---
 
-## 6. Versioning of the contract itself
+## 6. Dedup fingerprint
+
+If the Orchestrator detected a candidate duplicate, the Task carries a `dedup` block:
+
+```json
+"dedup": {
+  "fingerprint": "sha256:...",
+  "fingerprint_fields": ["actor.id", "entrypoint", "normalized_goal", "salient_inputs"],
+  "candidate_task_ids": ["task_01HX..."],
+  "confirmed_duplicate_of": null,
+  "suppression_expires_at": null
+}
+```
+
+See [orchestration.md §4](orchestration.md) for the full algorithm and retention rules.
+
+---
+
+## 7. Versioning of the contract itself
 
 The Task contract has its own version, stored on the `release_manifest_id`. Backward-compatible changes (added optional fields) do not require a major bump. Renames or removed fields do. The Orchestrator refuses to process a Task whose contract version is unknown to its current release.

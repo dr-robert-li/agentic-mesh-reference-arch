@@ -1,0 +1,26 @@
+{
+  "_comment": "Illustrative, not normative. The decision record written when an approver responds to the AWAITING_HITL request shown in task.example.json. The Task resumes to the state recorded in hitl.from_state.",
+  "hitl_decision_id": "hd_01HXYZ0001",
+  "tenant_id": "tenant_acme",
+  "task_id": "task_01HXYZABCDEF0001",
+  "policy_ref": "pol_external_customer_writes@3",
+  "from_state": "POLICY_CHECK",
+  "requested_at": "2026-05-15T10:34:12Z",
+  "decided_at": "2026-05-15T10:41:58Z",
+  "approver": {
+    "kind": "human",
+    "id": "U07PROJLEAD",
+    "display_name": "Pat Lead",
+    "source": "slack:workspace_T01"
+  },
+  "decision": "approve",
+  "reason": "Confirmed the GTM Pipeline board is the correct external-customer board for ACME's Q2 engagement; description is on-point.",
+  "channel": "slack:DM:U07PROJLEAD",
+  "notification_ref": "evt_01HXYZ0042",
+  "resume_to_state": "POLICY_CHECK",
+  "recommended_action_at_request": "approve_then_execute",
+  "provenance": [
+    {"kind": "policy_decision", "ref": "dec_01HXYZ0007"},
+    {"kind": "event", "ref": "evt_01HXYZ0042"}
+  ]
+}

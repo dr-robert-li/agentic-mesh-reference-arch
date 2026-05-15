@@ -21,70 +21,171 @@ When asked to "implement" something here:
 
 ---
 
-## 2. Boundaries (do not cross without explicit instruction)
+## 2. Repository map
 
-1. **Do not invent new top-level concepts.** If you find a gap, propose it in a doc, do not silently extend the model.
-2. **Do not change the Task contract shape** in `docs/task-contract.md` without simultaneously updating: `architecture.md`, `orchestration.md`, `evaluator.md`, and `examples/task.example.json`.
-3. **Do not weaken governance.** Policies are durable. Criteria are proposals until accepted. Never document a path where an agent bypasses policy enforcement.
-4. **Do not expose raw credentials to agents.** Tool calls go through the Tool Gateway. Document accordingly.
-5. **Do not introduce a frontend.** V1 monitoring is Slack / API / MCP only.
-6. **Do not bundle V1 with later features.** GraphQL, marketplace, multi-region, fine-tuning are explicitly deferred.
+```
+.
+├── README.md                       # entrypoint overview, V1 scope, full diagram
+├── CHANGELOG.md                    # docs release notes (Keep a Changelog / semver)
+├── AGENTS.md                       # this file
+├── docs/
+│   ├── architecture.md             # planes, entrypoints, components
+│   ├── task-contract.md            # the Task object, state machine, provenance
+│   ├── governance.md               # policies, enforcement, HITL, trigger phases
+│   ├── evaluator.md                # criteria, proposal-to-accept flow
+│   ├── orchestration.md            # state ownership, waves, dedup, kill switch, DLQ
+│   ├── versioning.md               # @version syntax, status vs ops, pin bindings, release manifests
+│   ├── tool-plans.md               # trust tiers, credentials, default vs client packs
+│   ├── v1-dogfood-scenarios.md     # the three workflows + four cross-cutting scenarios
+│   └── operations.md               # five log streams, monitoring without a frontend
+├── examples/
+│   ├── task.example.json           # a populated Task with provenance and dedup
+│   ├── policy.example.yaml         # a hybrid HITL policy with evaluator_options
+│   ├── routine.example.yaml        # a routine version + pin binding
+│   ├── criterion.example.yaml      # an evaluator-proposed criterion
+│   ├── hitl-decision.example.json  # an approval record
+│   ├── logs.example.json           # one sample line from each log stream
+│   ├── dedup-fingerprint.example.json
+│   ├── release-manifest.example.yaml
+│   └── tool-plan.example.yaml
+└── docs/proposals/                 # short proposals for cross-cutting changes (created on demand)
+```
+
+If `docs/proposals/` does not yet exist, create it the first time you need it. It is for
+short markdown files that describe a change spanning multiple docs *before* the docs are
+edited — see §7.
 
 ---
 
-## 3. Non-goals (for V1 documentation)
+## 3. Glossary
 
-- Production deployment manifests (Terraform, Helm, etc.).
-- Exact DB schemas. The docs describe the **shape** of records, not DDL.
-- Vendor lock-in to a specific LLM provider. The "model cascade" is a tier description, not a model list.
-- A web UI.
-- Performance SLOs. State the latency/consistency *concerns* but do not invent numbers.
+Use these terms exactly. Casing matters.
+
+| Term | Meaning |
+|------|---------|
+| **Task** | The canonical work-unit object. Capitalized. See [docs/task-contract.md](docs/task-contract.md). |
+| **Orchestrator** | Sole writer of Task `state`. |
+| **Planner / Decomposer** | Produces a plan (waves of subtasks) from a Task. Optional split. |
+| **Wave** | A parallel batch of sibling subtasks. |
+| **Governance** | The policy layer that decides *whether* a Task or step is allowed. |
+| **Policy** | A durable, versioned governance rule. |
+| **Policy Engine** | Enforces policies, deterministically or via an LLM judge. |
+| **Evaluator** | Scores Task/wave output against criteria. May propose new criteria. |
+| **Criterion** | The unit of evaluation. Versioned. Proposed (status `candidate`) until accepted. |
+| **Criteria suite** | A versioned bundle of criteria attached to a routine, policy, or release manifest. |
+| **Validator (Contract Validator)** | Checks **shape**, not meaning. Cheap, deterministic, ubiquitous. |
+| **Routine** | A reusable, DB-persisted execution pattern. Versioned. |
+| **Release manifest** | The pinning record. Resolves every dependency a Task runs against. |
+| **Pin binding** | A `(scope, routine_id) -> routine_id@version` row. Not a status. |
+| **Tool plan** | A per-tenant bundle of allowed tools, tiers, and credential aliases. |
+| **Tool Gateway** | The single boundary where credentials are resolved at call time. |
+| **Trust tier** | An unordered enum: `read_safe`, `read_sensitive`, `write_revocable`, `write_destructive`, `external_egress`. |
+| **HITL** | Human-In-The-Loop approval. Pauses a Task; resumes to the state the gate fired from. |
+| **DLQ** | Dead Letter Queue for poison-pill messages. |
+| **Provenance** | An append-only list of references that explain *why* a Task did what it did. |
+| **Entrypoint** | One of `slack`, `api`, `mcp`, `internal` (V1). `graphql` is reserved for post-V1. |
+| **`artifact_id@version`** | The mandatory reference syntax. See [docs/versioning.md §1](docs/versioning.md). |
 
 ---
 
-## 4. Implementation conventions for this repo
+## 4. Component boundary guardrails
 
-When you edit this repository:
+These boundaries are load-bearing. Crossing them silently breaks the audit chain.
 
-### 4.1 File layout
+| Boundary | Who decides | Who must **not** decide |
+|----------|-------------|-------------------------|
+| **Whether** a Task / step is allowed | **Governance / Policy Engine** | Routines, evaluator, executors. |
+| **Shape correctness** of inputs/outputs | **Contract Validator** | Evaluator, governance. (Shape failures revert state; meaning failures emit verdicts.) |
+| **Meaning correctness** of outputs | **Evaluator** | Validator (it only sees shape), governance (it decides *allowance*, not *quality*). |
+| **State transitions** on a Task | **Orchestrator** | Everyone else. Other components *recommend* transitions. |
+| **Routine lifecycle** (status + ops) | **Routine registry**, governed by [docs/versioning.md](docs/versioning.md) | Evaluator (it may propose; it does not promote). Policies (they may govern recall; they do not write rows). |
+| **Pinning** | **Pin-binding table**, scoped per §4.2 of versioning.md | The routine itself — pinning is not a status. |
+| **Credential resolution** | **Tool Gateway** | Agents, executors, prompts. Agents only ever see the credential **alias**. |
+
+If you find yourself documenting a path where one of these boundaries is crossed, stop
+and propose a docs update first.
+
+---
+
+## 5. Anti-patterns
+
+Do not:
+
+1. **Invent new Task lifecycle states.** The set in [docs/task-contract.md §2](docs/task-contract.md) is closed. Add one only via a proposal under `docs/proposals/`.
+2. **Invent new entrypoint enum values.** V1 is `slack | api | mcp | internal`. `graphql` is reserved. Anything else needs a proposal.
+3. **Use ordinal comparisons on trust tiers.** `tool.tier > read_safe` is undefined. Use set membership: `tool.tier in {"write_revocable", "write_destructive"}`. See [docs/governance.md §3](docs/governance.md).
+4. **Use `status: pinned` on a routine.** Pinning is a binding, not a status. See [docs/versioning.md §4](docs/versioning.md).
+5. **Pause a Task on a *proposed* evaluator criterion.** Criterion proposals are written asynchronously; they do not transition Task state. See [docs/task-contract.md §2.1](docs/task-contract.md).
+6. **Treat the Evaluator as a governance layer.** Criteria do not block tool access; policies do.
+7. **Pass credentials through agent context.** Tool calls go via the Gateway. Agents see the alias only.
+8. **Introduce a frontend.** V1 monitoring is Slack / API / MCP only.
+9. **Bundle V1 with later features.** GraphQL, marketplace, multi-region, fine-tuning are explicitly deferred.
+10. **Edit a versioned artifact in place.** All writes are new rows (`@n+1`). The persistence layer enforces this.
+
+---
+
+## 6. Conventions
+
+### 6.1 File layout
 - All long-form docs live in `docs/`.
 - Examples live in `examples/` as `.json` or `.yaml`. Keep them small and illustrative.
 - `README.md`, `CHANGELOG.md`, and `AGENTS.md` stay at the root.
+- Cross-doc proposals live in `docs/proposals/<short-slug>.md`.
 
-### 4.2 Markdown style
+### 6.2 Markdown style
 - One `# H1` per file, matching the filename's intent.
 - Section numbering is allowed (e.g. `## 3.`) when a doc has more than three top-level sections; otherwise omit.
 - Use Mermaid for diagrams. Prefer `flowchart` and `stateDiagram-v2`. Avoid sequence diagrams longer than ~15 lines.
 - Tables are encouraged for enumerations (states, tiers, scenarios).
 - Keep paragraphs short. Bias to bullet lists where the content is a list.
 
-### 4.3 Terminology (use these exact terms)
-- **Task** (capitalized) — the canonical work-unit object.
-- **Orchestrator** — owns state transitions.
-- **Planner / Decomposer** — optional split; treat as one concept unless splitting matters.
-- **Governance** / **Policy** — durable rules; **Policy Engine** enforces.
-- **Evaluator** — produces evaluation results and proposes criteria.
-- **Criteria** — what an evaluator measures; proposals until accepted.
-- **Routine** — a reusable, DB-persisted execution pattern.
-- **Release manifest** — pins versions of policy, prompt, runner/routine, tool plan, contract, evaluator criteria.
-- **Tool Gateway** — credential boundary and tool-call enforcement point.
-- **Tool plan** — per-tenant, per-client bundle of allowed tools and trust tiers.
-- **Wave** — a parallel batch of sibling subtasks.
-- **HITL** — Human-In-The-Loop approval step.
-- **DLQ** — Dead Letter Queue for poison-pill messages.
+### 6.3 Terminology
+- Use the glossary in §3 verbatim. If you need a new term, add it to the glossary in the same commit.
+- Use the `artifact_id@version` form whenever referring to a specific version.
 
-### 4.4 Cross-references
-- When introducing a concept, link to the doc that defines it: e.g. `See [governance.md](docs/governance.md).`
+### 6.4 Examples
+- Examples are **illustrative**, not normative. State this at the top of each example file with a comment.
+- Use ISO-8601 UTC timestamps: `2026-05-15T10:33:00Z`.
+- Use fake but plausible IDs: `task_01HXYZ...`, `pol_001`, `rt_001`.
+- Every tenant-scoped example object must include a `tenant_id` field.
+
+### 6.5 Cross-references
+- When introducing a concept, link to the doc that defines it.
 - Do not duplicate definitions across docs — link instead.
 
-### 4.5 Examples
-- Examples are **illustrative**, not normative. State this at the top of each example file with a comment.
-- Use ISO-8601 UTC timestamps in examples: `2026-05-15T10:33:00Z`.
-- Use fake but plausible IDs: `task_01HXYZ...`, `pol_001`, `rt_001`.
+### 6.6 Testing and documentation convention
+This repo has no test suite (it is documentation). The equivalent gates are:
+
+1. **`grep` for forbidden strings** before committing. The CI-equivalent checklist:
+   - `grep -rn "status: pinned" docs/ examples/` → must return empty.
+   - `grep -rn "tool\.tier *> *read_safe" docs/` → must return empty.
+   - `grep -rn "\"graphql\"" examples/` → must return empty (the string `graphql` may appear in docs as a deferred-entrypoint reference only).
+   - `grep -rn "docs/proposals" .` → if matched, the directory must exist.
+2. **Every doc change touches its examples.** If you add a Task field, update `examples/task.example.json`. If you add a routine op, update `examples/routine.example.yaml`.
+3. **Every new state, enum value, or top-level concept gets a `docs/proposals/<slug>.md` entry first.** That file is a short markdown describing the change, the affected docs, and the migration story. After review, the proposal is merged into the affected docs and the proposal file is deleted in the same commit.
+4. **`CHANGELOG.md` entry** under `## [Unreleased]` for any change that is not a typo or formatting fix.
 
 ---
 
-## 5. Safety rules
+## 7. How to extend the architecture safely
+
+A typical extension looks like this:
+
+1. Identify which doc(s) own the concept.
+2. If it spans multiple docs (or introduces a new state, enum, or boundary), draft a short file at `docs/proposals/<slug>.md` first. Create `docs/proposals/` if missing.
+3. Update the affected docs in one commit (and delete the proposal file in the same commit once accepted).
+4. Add or update one or more examples in `examples/`.
+5. Add a `CHANGELOG.md` entry under an `## [Unreleased]` heading (create it if missing).
+
+Do **not** ship a doc change that:
+- Renames a contract field without updating examples.
+- Adds a state to the Task lifecycle without updating `orchestration.md`.
+- Adds a new entrypoint without updating `architecture.md` and `README.md`.
+- Adds a new status to the routine enum without updating `versioning.md` and `routine.example.yaml`.
+
+---
+
+## 8. Safety rules
 
 These apply both to what you **document** and to what you **do** in this repo.
 
@@ -97,24 +198,7 @@ These apply both to what you **document** and to what you **do** in this repo.
 
 ---
 
-## 6. How to extend the architecture safely
-
-A typical extension looks like this:
-
-1. Identify which doc(s) own the concept.
-2. If it spans multiple docs, draft a short proposal at the top of `docs/architecture.md` under a "Pending changes" section, or in a dedicated `docs/proposals/` file if multiple are in flight.
-3. Update the affected docs in one commit.
-4. Add or update one or more examples in `examples/`.
-5. Add a `CHANGELOG.md` entry under an `## [Unreleased]` heading (create it if missing).
-
-Do **not** ship a doc change that:
-- Renames a contract field without updating examples.
-- Adds a state to the Task lifecycle without updating `orchestration.md`.
-- Adds a new entrypoint without updating `architecture.md` and `README.md`.
-
----
-
-## 7. How to implement this architecture (in a separate code repo)
+## 9. How to implement this architecture (in a separate code repo)
 
 If you are reading this from inside a future implementation repository, follow this order:
 
@@ -131,17 +215,17 @@ For each milestone, write the smallest test that proves the loop closes.
 
 ---
 
-## 8. Conflicts between this file and the user's request
+## 10. Conflicts between this file and the user's request
 
 If the user's instruction directly contradicts a rule in this file:
 
-- For **safety rules (§5)**: refuse and explain.
-- For **boundaries (§2)**: ask once; if the user confirms, proceed but record the deviation in the commit message.
-- For **conventions (§4)**: follow the user's preference for this change.
+- For **safety rules (§8)**: refuse and explain.
+- For **boundaries (§4) or anti-patterns (§5)**: ask once; if the user confirms, proceed but record the deviation in the commit message *and* open a `docs/proposals/` file describing the deviation.
+- For **conventions (§6)**: follow the user's preference for this change.
 
 ---
 
-## 9. Where to look next
+## 11. Where to look next
 
 - Architecture overview: [docs/architecture.md](docs/architecture.md)
 - Task object: [docs/task-contract.md](docs/task-contract.md)

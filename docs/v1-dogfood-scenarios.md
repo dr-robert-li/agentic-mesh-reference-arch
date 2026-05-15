@@ -133,17 +133,17 @@ its sources, and the evaluator enforces that the citations actually support the 
 
 ## 6. Cross-cutting scenario 3 — Persistent routine lifecycle
 
-**Setup.** Workflow A has run twice successfully. A routine `rt_tldv_to_monday` has been
-**proposed** (status: `proposed`) based on those Tasks.
+**Setup.** Workflow A has run twice successfully. A routine `rt_tldv_to_monday@1` has been
+written with status `candidate` based on those Tasks.
 
 **Steps to demonstrate.**
-1. **Recall.** A user runs Workflow A; the planner *recalls* the proposed routine instead of planning from scratch.
-2. **Update.** A reviewer accepts the routine; later they `update` it to add a new criterion.
-3. **Pin.** A pin is placed on `rt_tldv_to_monday@2` for tenant T so the routine is stable through subsequent updates.
+1. **Recall.** A user runs Workflow A; the planner *recalls* the candidate routine instead of planning from scratch.
+2. **Update.** A reviewer accepts the routine (status -> `active`); later they `update` it to write `rt_tldv_to_monday@2` (also `active`); v1 transitions to `deprecated`.
+3. **Pin.** A pin binding is written for `scope: tenant:T -> rt_tldv_to_monday@2` so the routine is stable through subsequent updates.
 4. **Copy.** Tenant T' copies the routine; provenance records the source.
-5. **Deprecate / archive.** When `v3` lands and is pinned, `v2` is deprecated and eventually archived; historical Tasks still resolve `v2`.
+5. **Deprecate / archive.** When `v3` lands and a new pin is written, `v2` transitions to `deprecated` and eventually `archived`; historical Tasks still resolve `v2`.
 
-This scenario validates the full operation set in [versioning.md §3.1](versioning.md).
+This scenario validates the full operation set in [versioning.md §4.1](versioning.md).
 
 ---
 

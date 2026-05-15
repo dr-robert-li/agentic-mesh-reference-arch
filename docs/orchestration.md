@@ -57,18 +57,57 @@ Properties:
 
 Goal: do not let users (or other agents) accidentally fire the same expensive workflow twice.
 
-Algorithm:
+### 4.1 Fingerprint
 
-1. On Task creation, compute a **similarity fingerprint** from `(actor, entrypoint, normalized_goal, salient_inputs)` using an **S** tier model for the natural-language portion and a deterministic hash for the structured portion.
-2. Search active and recently-terminal Tasks within the last **15 minutes** for the same fingerprint within a similarity threshold.
-3. If a candidate is found:
-   - Transition to `AWAITING_DUP_CONFIRM`.
+The **similarity fingerprint** is computed at Task creation from these fields, in this order:
+
+| Field | Source | Treatment |
+|-------|--------|-----------|
+| `tenant_id` | Task | Exact match required. Fingerprints are **always scoped to one tenant**; cross-tenant deduplication is forbidden by construction. |
+| `actor.id` | Task | Exact match required. |
+| `entrypoint` | Task | Exact match required. (A Slack-originated request never collides with an API-originated one.) |
+| `normalized_goal` | Task.goal | Lowercased, whitespace-collapsed, stop-word-trimmed, then embedded by an **S**-tier model. |
+| `salient_inputs` | Task.inputs (subset) | Routine-declared "salient" fields (e.g. for Workflow A: `tldv_recording_url`, `monday_board_name`). Hashed deterministically (SHA-256 over a canonical JSON form). |
+
+The result is a record `{tenant_id, actor_id, entrypoint, salient_hash, goal_embedding}` plus a derived `fingerprint` id (SHA-256 over the canonical form, with the embedding rounded to a quantized vector for hashability).
+
+A concrete shape is in [`examples/dedup-fingerprint.example.json`](../examples/dedup-fingerprint.example.json).
+
+### 4.2 Storage and retention
+
+- Fingerprints are stored in the `dedup_index` table for **24 hours** after Task creation, regardless of the Task's terminal outcome.
+- Storage is **per-tenant** with row-level scope; no cross-tenant join is possible.
+- A background sweep drops fingerprints older than 24h. There is no longer-term retention.
+
+### 4.3 Algorithm
+
+1. On Task creation, compute the fingerprint as above.
+2. Search the `dedup_index` for the same `(tenant_id, actor_id, entrypoint, salient_hash)` plus embedding cosine similarity ≥ **0.92** (the V1 default; configurable per tenant) within the last **15 minutes**.
+3. **Terminal-state eligibility.** A candidate is eligible if it is either still active *or* in a terminal state of `SUCCEEDED`, `SUPPRESSED`, or `AWAITING_DUP_CONFIRM`. Tasks that ended in `FAILED`, `DENIED`, or `CANCELLED` are **not** eligible candidates — those represent intentional re-tries, not duplicates.
+4. If an eligible candidate is found:
+   - Transition the new Task to `AWAITING_DUP_CONFIRM`.
    - Ask the user on the originating surface: *"This looks like the request you made at HH:MM. Are these the same? [Yes, same] [No, different]"*.
-4. On `Yes, same`: transition to `SUPPRESSED`. Record a suppression window of **24 hours** during which similar requests from the same actor are auto-suppressed without prompting (instead pointing at the original Task).
-5. On `No, different`: continue to `PLANNING`. Also store a "false-match" hint so the same near-miss does not prompt again.
-6. If no candidate: continue to `PLANNING`.
+5. On `Yes, same`: transition to `SUPPRESSED`. Open a **24-hour suppression window** keyed by `(tenant_id, actor_id, fingerprint)` during which matching requests are auto-suppressed without prompting (the user is instead pointed at the original Task).
+6. On `No, different`: continue to `PLANNING`. Also store a "false-match" hint so the same near-miss does not prompt again.
+7. If no candidate: continue to `PLANNING`.
 
-The 24h suppression is per `(actor, fingerprint)`. It expires automatically.
+### 4.4 Suppression-window behavior
+
+- The window is **per `(tenant_id, actor_id, fingerprint)`** and expires automatically after 24 hours.
+- A new request inside the window is **not** prompted; the Task transitions directly to `SUPPRESSED` and the response surfaces a link to the original Task.
+- After 24 hours, the suppression expires and a similar request will once again pass through the `AWAITING_DUP_CONFIRM` flow.
+
+### 4.5 Dedup branch in the orchestration flow
+
+```mermaid
+flowchart TD
+    R[RECEIVED] --> D[DEDUPLICATING]
+    D -->|no candidate| P[PLANNING]
+    D -->|candidate found| Q[AWAITING_DUP_CONFIRM]
+    Q -->|user: same| S[SUPPRESSED<br/>24h window opens]
+    Q -->|user: different| P
+    Q -->|within active 24h window| S
+```
 
 ---
 
@@ -83,6 +122,17 @@ The 24h suppression is per `(actor, fingerprint)`. It expires automatically.
 - For Tasks whose expected lifetime exceeds the "short" threshold (e.g. multi-day campaigns, scheduled cohorts), the Orchestrator supports running the same logical Task under **two pinned versions simultaneously**.
 - A reconciliation step compares the outputs and either auto-accepts when they agree or escalates to HITL when they diverge.
 - This is the only mechanism by which a long-running Task picks up a mid-flight policy / routine update.
+
+```mermaid
+flowchart LR
+    T[Long-running Task<br/>pinned at R1] --> F[Fork at policy change]
+    F --> A[Branch A<br/>continues under R1]
+    F --> B[Branch B<br/>runs under R2]
+    A --> R[Reconcile]
+    B --> R
+    R -->|outputs agree| ADOPT[Adopt R2 for remaining waves]
+    R -->|outputs diverge| HITL[AWAITING_HITL<br/>with diff]
+```
 
 ### 5.3 State compatibility
 The Task contract version is part of the release manifest. The Orchestrator refuses to

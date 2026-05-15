@@ -1,0 +1,41 @@
+# Illustrative, not normative. A criterion proposed by the Evaluator after observing
+# that Workflow A produced an item on the correct board but with no description.
+# This file shows a `candidate` criterion that has NOT yet been accepted.
+
+criterion_id: cr_monday_item_has_description
+version: 1
+tenant_id: tenant_acme
+
+intent: |
+  When a Monday.com item is created from a tl;dv transcript, the item description
+  must contain at least one extracted action item. An empty description is a
+  silent failure that passes the shape contract but defeats the user's intent.
+
+applies_to:
+  routine_refs:
+    - rt_tldv_to_monday@2
+  release_manifest_refs: []
+
+kind: assertion
+spec:
+  language: jsonpath-predicate
+  expression: |
+    $.result.monday_item.description != null
+    AND length($.result.monday_item.description) > 0
+    AND count($.result.action_items[*]) >= 1
+
+status: candidate         # not yet accepted; the Task did NOT pause for this
+accepted_by: null
+accepted_at: null
+
+provenance:
+  origin: evaluator_proposed
+  proposing_evaluation_id: ev_01HXYZ0099
+  proposing_task_id: task_01HXYZABCDEF0001
+  rationale: |
+    Across 27 successful runs of rt_tldv_to_monday@2 in the last 7 days, three
+    runs produced a Monday item with an empty description. All three had a
+    transcript that yielded zero action items; the agent should have raised
+    that rather than silently creating an empty task.
+
+created_at: "2026-05-14T22:11:00Z"

@@ -30,7 +30,7 @@ For each evaluation pass it emits:
 | `criterion_results[]` | Per-criterion result: `pass`, `fail`, `unknown`, plus a justification. |
 | `metrics[]` | Numeric metrics (similarity scores, confidence, latency, cost). |
 | `verdict` | Aggregate `pass`, `fail`, `degraded`. |
-| `proposed_criteria[]` | New criteria the Evaluator suggests adding, each with rationale. Always `status: proposed`. |
+| `proposed_criteria[]` | New criteria the Evaluator suggests adding, each with rationale. Always written as `candidate` review records, asynchronously — never pauses the Task. |
 | `model_tier` | The cascade tier used (usually **L**). |
 | `provenance` | Inputs, the routine version, the release manifest, and the data sampled. |
 
@@ -49,7 +49,7 @@ A **criterion** is the unit of evaluation:
 | `applies_to` | Routine ID(s), policy ID(s), or `release_manifest_id` scope. |
 | `kind` | `assertion`, `metric`, `judge` (LLM-based). |
 | `spec` | The deterministic predicate, the metric formula, or the judge prompt. |
-| `status` | `proposed`, `accepted`, `deprecated`, `archived`. |
+| `status` | `candidate`, `accepted`, `deprecated`, `archived`. (`candidate` replaces the older spelling `proposed` for consistency with the routine status enum — see [versioning.md §1](versioning.md).) |
 | `accepted_by` | Human ID, or `policy:<policy_id>` if auto-accepted. |
 | `provenance` | Where it came from: human-authored, Evaluator-proposed, derived from incident. |
 
@@ -64,25 +64,27 @@ The Evaluator's superpower is that it can spot a gap in its own coverage:
 
 > "I noticed the task asserted `monday_item_id` exists, but did not assert it lives on the board the user named. Propose new criterion."
 
-That proposal is **not active** until accepted.
+A proposal is written **asynchronously** to the criteria store as a `candidate` record. **The Task itself does not pause.** Proposals surface to humans through the review channels in [operations.md §2](operations.md), exactly like proposed policies.
 
 ```mermaid
 flowchart LR
-    EV[Evaluator] -->|proposes| PROP[proposed criterion]
+    EV[Evaluator] -->|writes async| PROP["candidate criterion"]
     PROP -->|human reviews via Slack/API/MCP| HUM{accept?}
-    PROP -->|policy: auto_accept = true| AUTO[auto-accept]
-    HUM -->|yes| ACT[accepted criterion v1]
+    PROP -->|policy with evaluator_options.auto_accept_criteria=true| AUTO[auto-accept]
+    HUM -->|yes| ACT["accepted criterion @1"]
     HUM -->|no| ARCH[archived]
     AUTO --> ACT
-    ACT -->|next change| ACT2[accepted v2]
+    ACT -->|next change| ACT2["accepted criterion @2"]
 ```
 
 Acceptance options:
 
 1. **Human acceptance** via the surface the proposal arrived on (typically Slack, optionally API/MCP). The accepting actor, timestamp, and reason are recorded.
-2. **Policy-driven auto-accept.** A governance policy may declare `auto_accept_evaluator_criteria: true` for a specific routine or scope (typically used for high-volume low-risk routines where reviewer fatigue would otherwise dominate).
+2. **Policy-driven auto-accept.** A governance policy may declare `evaluator_options.auto_accept_criteria: true` (legacy alias: `auto_accept_evaluator_criteria`) for a specific routine or scope. Typically used for high-volume low-risk routines where reviewer fatigue would otherwise dominate.
 
-Accepted criteria are versioned and become part of the next **release manifest** that references the routine/policy in question — see [versioning.md](versioning.md).
+**Rule.** Evaluator-generated criteria are *proposed* (status `candidate`) until accepted by a human or by a policy authorized to auto-accept. On acceptance the criterion is **versioned** (`@1`, `@2`, …) and **reused** via the criteria store and the next release manifest that references the routine/policy in question — see [versioning.md](versioning.md).
+
+A concrete proposed criterion is in [`examples/criterion.example.yaml`](../examples/criterion.example.yaml).
 
 ---
 

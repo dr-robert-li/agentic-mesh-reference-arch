@@ -1,6 +1,7 @@
 # Illustrative, not normative. The routine distilled from successful runs of Workflow A
 # (tl;dv -> Monday.com). After two successful runs, the Planner proposed this routine;
-# a human accepted it; it is now pinned at v2 for tenant_acme.
+# a human accepted it. tenant_acme has a separate pin binding that resolves this
+# routine to v2 — see pin_bindings at the bottom of this file.
 
 routine_id: rt_tldv_to_monday
 version: 2
@@ -65,7 +66,7 @@ policy_refs:
 evaluator_refs:
   - cs_tldv_to_monday@4
 
-status: pinned    # tenant_acme has pinned v2; later versions exist as proposed
+status: active    # the version's own lifecycle state; pinning is a separate binding (see below)
 
 provenance:
   origin: distilled_from_task
@@ -79,4 +80,11 @@ provenance:
 
 created_at: "2026-05-02T14:21:00Z"
 accepted_at: "2026-05-03T09:00:00Z"
-pinned_at:   "2026-05-09T10:00:00Z"
+
+# Pin bindings live in a separate table; reproduced here for illustration.
+# A pin is a (scope, routine_id) -> routine_id@version binding, not a status.
+pin_bindings:
+  - scope: tenant:tenant_acme
+    routine_ref: rt_tldv_to_monday@2
+    pinned_at: "2026-05-09T10:00:00Z"
+    pinned_by: U07PROJLEAD

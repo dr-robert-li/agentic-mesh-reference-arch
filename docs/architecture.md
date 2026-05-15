@@ -10,7 +10,7 @@ The mesh has four planes:
 
 | Plane | Purpose | Key components |
 |-------|---------|----------------|
-| **Entry** | Receive intent from humans or other agents | Slack app, MCP server, REST API, (later) GraphQL |
+| **Entry** | Receive intent from humans or other agents | Slack app, REST API, MCP server; GraphQL is a deferred future entrypoint |
 | **Control** | Decide *what* should happen and *whether* it is allowed | Orchestrator, Planner/Decomposer, Governance, Evaluator, Contract Validator, Routine & Release Registry |
 | **Execution** | Do the work | Executor abstraction, Agent runners (model cascade), Tool Gateway |
 | **Persistence & Telemetry** | Durable state and observability | Task store, Policy store, Routine store, Log streams |
@@ -19,9 +19,9 @@ The mesh has four planes:
 flowchart LR
     subgraph Entry
         SLK[Slack]
-        MCP[MCP]
         API[REST API]
-        GQL[GraphQL<br/>later]
+        MCP[MCP]
+        GQL[GraphQL<br/>deferred post-V1]
     end
     subgraph Control
         ORCH[Orchestrator]
@@ -63,12 +63,28 @@ flowchart LR
 
 ## 2. Entrypoints
 
+### 2.1 V1 entrypoint enum
+
+The canonical `entrypoint` enum in V1 is exactly:
+
+```
+slack | api | mcp | internal
+```
+
 | Entrypoint | Role | When to use | Notes |
 |------------|------|-------------|-------|
-| **Slack** | Primary human interaction client | Slash commands, message actions, threaded approvals | Slack is a client of the API; not a source of truth. |
-| **MCP** | External-agent interface and loopback | Other agents invoke the mesh; the mesh can also invoke *itself* via MCP for recursive sub-tasks | Loopback is useful for testing mesh-to-mesh and for letting an in-mesh agent reuse the same governed surface. |
-| **REST API** | Source of truth | Programmatic access, internal services, Slack and MCP both depend on it | Stable, versioned, OpenAPI-described. |
-| **GraphQL** | Optional / later | Rich client integrations, schema-driven exploration | Deferred past V1. |
+| **`slack`** | Primary human interaction client | Slash commands, message actions, threaded approvals | Slack is a client of `api`; not a source of truth. |
+| **`api`** | Command/control surface — the source of truth | Programmatic access, internal services, Slack and MCP both depend on it | REST, stable, versioned, OpenAPI-described. The *only* write surface. |
+| **`mcp`** | External-agent interface and loopback | Other agents invoke the mesh; the mesh can also invoke *itself* via MCP for recursive sub-tasks | Loopback is useful for testing mesh-to-mesh and for letting an in-mesh agent reuse the same governed surface. |
+| **`internal`** | Tasks not originating from a user-facing entrypoint | Scheduled jobs, child Tasks created by parents, replay-derived Tasks | Always carries a non-human `actor` and a provenance pointer to whatever created it. |
+
+### 2.2 Deferred entrypoints
+
+| Future entrypoint | Why deferred | Earliest target |
+|-------------------|--------------|------------------|
+| `graphql` | The REST API is the V1 source of truth. GraphQL is intended for complex *query* surfaces (federated dashboards, schema-driven exploration), not for command/control. Adding it before the command surface is stable would split the contract. | Post-V1, after the REST contract has been frozen for at least one release. |
+
+In V1 documentation, examples, and code, `graphql` is **not** a legal value of `entrypoint`. Adding it requires the docs-update workflow in [AGENTS.md](../AGENTS.md).
 
 Every entrypoint normalizes its input into a Task (or operation against a Task) and hands it to the Orchestrator.
 

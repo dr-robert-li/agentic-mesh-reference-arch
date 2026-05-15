@@ -40,17 +40,39 @@ Policies can enter the system three ways:
 
 The compilation step in (2) and (3) is itself a Task — it has provenance, is logged, and uses a large-tier model because policy authoring is high-stakes and ambiguous.
 
+### 2.1 Policy trigger phases
+
+Where a policy fires over the Task lifecycle:
+
+```mermaid
+flowchart LR
+    A[on_task_create] --> B[on_plan]
+    B --> C[pre_tool_call]
+    C --> D[post_tool_call]
+    D --> E[pre_egress]
+    E --> F[post_evaluation]
+```
+
+A single policy can declare multiple `triggers`. `pre_tool_call` and `pre_egress` are the
+two most common gates that fire `require_hitl`; `post_evaluation` is where policies
+that depend on evaluator verdicts (or that auto-accept evaluator criteria) attach.
+
 ---
 
 ## 3. Deterministic vs agentic enforcement
 
 | Mode | What runs | When to use |
 |------|-----------|-------------|
-| **Deterministic** | A schema-checkable predicate (e.g. `tool.tier > read_safe AND tenant.region == 'eu'`) | When the rule is exact, hot-path, and fast. Most "you can't call X without Y" rules. |
+| **Deterministic** | A schema-checkable predicate using **set membership** over the trust-tier enum (e.g. `tool.tier in {"write_revocable", "write_destructive"} AND tenant.region == "eu"`) | When the rule is exact, hot-path, and fast. Most "you can't call X without Y" rules. |
 | **Agentic** | An LLM judge invoked with policy text and Task context | When the rule depends on intent or natural-language nuance (e.g. "we shouldn't book external dependencies in customer-facing copy"). |
 | **Hybrid** | Deterministic prefilter, agentic only on near-misses | Default for ambiguous policies with a hot path. |
 
 Agentic enforcement uses the **L** model tier. Deterministic uses no LLM. Hybrid uses **S/M** for prefilter, **L** only on escalation.
+
+**Trust tiers are an unordered enum, not an ordinal scale.** Policies must use set
+membership (`in`, `not in`) rather than comparison operators. Writing `tool.tier >
+read_safe` is undefined behavior. See [tool-plans.md §1](tool-plans.md) for the tier
+list.
 
 ---
 
@@ -83,11 +105,13 @@ stateDiagram-v2
 
 When `on_violation = require_hitl`:
 
-1. Orchestrator transitions the Task to `AWAITING_HITL`.
+1. Orchestrator transitions the Task to `AWAITING_HITL`, recording `hitl.from_state` (the state the gate fired from — typically `POLICY_CHECK` or `EVALUATING`).
 2. A notification is sent to the policy's configured channel (Slack channel, API webhook, MCP subscriber).
 3. The notification carries: actor, entrypoint, timestamp, policy ID + version, reason, and a **recommended action**.
 4. An approver responds via the same channel; the response becomes a `hitl_decision` provenance entry.
-5. Orchestrator resumes the Task or transitions it to `DENIED`.
+5. On **approve**: Orchestrator resumes the Task to `hitl.from_state`. On **deny**: Orchestrator transitions the Task to `DENIED`.
+
+A concrete decision record is in [`examples/hitl-decision.example.json`](../examples/hitl-decision.example.json).
 
 ```mermaid
 sequenceDiagram
@@ -112,12 +136,28 @@ A worked example is in [v1-dogfood-scenarios.md §5](v1-dogfood-scenarios.md).
 
 ## 7. Relationship to the Evaluator
 
-The Evaluator may *propose* new criteria. A criterion is not a policy — it lives next to a routine or release. However:
+The Evaluator may *propose* new criteria. A criterion is not a policy — it lives next to a routine or release.
 
-- A policy can declare `auto_accept_evaluator_criteria: true` for a specific routine or scope. In that case, proposed criteria become active without HITL.
-- Otherwise, criteria proposals enter the same review surface as policy proposals.
+**Rule.** Evaluator-generated criteria are written as `candidate` review records and remain
+proposals until either (a) a human accepts them, or (b) a policy with
+`auto_accept_evaluator_criteria: true` authorizes auto-acceptance for the criterion's
+scope. On acceptance, the criterion is versioned (`v1`) and reused via release manifests.
+A Task is **not paused** by criterion proposals — see [task-contract.md §2.1](task-contract.md).
 
-See [evaluator.md](evaluator.md).
+A policy that authorizes auto-acceptance carries an `evaluator_options` block:
+
+```yaml
+evaluator_options:
+  auto_accept_criteria: true        # canonical name; alias of auto_accept_evaluator_criteria
+  scope:
+    routine_refs: [rt_tldv_to_monday]
+    severity_at_most: degraded      # only auto-accept criteria whose worst observed verdict is `degraded`
+```
+
+The legacy spelling `auto_accept_evaluator_criteria` remains a recognized alias. Use
+`evaluator_options.auto_accept_criteria` in new examples for consistency.
+
+See [evaluator.md](evaluator.md) and [`examples/policy.example.yaml`](../examples/policy.example.yaml).
 
 ---
 

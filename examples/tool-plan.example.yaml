@@ -1,5 +1,13 @@
 # Illustrative, not normative. The tool plan that powers Workflows A, B, and C for tenant_acme.
 # Credentials are referenced by alias only. The Tool Gateway resolves aliases at call time.
+#
+# A tool plan is composed of two packs:
+#   - default_pack: tools every tenant gets (MCP Gateway, Google Workspace, Slack).
+#     Maintained centrally by the platform; appears identically across tenants except
+#     for credential aliases.
+#   - client_pack: tools specific to this tenant (Monday.com, tl;dv, Stripe, BigQuery,
+#     Twilio, etc.). Appears only where onboarding has enabled it.
+# Both packs go through the same Tool Gateway and the same policy_refs gating.
 
 tool_plan_id: tp_acme_2026_q2
 version: 4

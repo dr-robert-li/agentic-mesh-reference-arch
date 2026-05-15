@@ -1,6 +1,9 @@
-# Illustrative, not normative. The release manifest that the example Task pins to.
-# Every Task records the release_manifest_id it ran against; this is what makes
-# the platform reproducible under change.
+# Illustrative, not normative. The release manifest that the example Task resolves
+# against. Every Task records the release_manifest_id it ran against; this is what
+# makes the platform reproducible under change. See docs/versioning.md §5.
+#
+# Every reference uses the artifact_id@version syntax defined in docs/versioning.md §1.
+# The manifest itself is named by id (rm_2026_05_15_a); its date-shaped id is its version.
 
 release_manifest_id: rm_2026_05_15_a
 tenant_id: tenant_acme
@@ -11,48 +14,46 @@ platform:
   notes: |
     First release after the side-by-side versioning landing. No contract-breaking changes.
 
+# Each entry pins one dependency at a specific version, using the @version reference
+# form. Items appear here only if they are referenced by an active routine or policy
+# in this manifest — manifests do not carry unused references.
+
 prompts:
-  - id: pt_extract_action_items
-    version: 5
-  - id: pt_slack_confirmation
-    version: 2
-  - id: pt_grounded_monday_review
-    version: 3
+  - ref: pt_extract_action_items@5      # used by rt_tldv_to_monday
+  - ref: pt_slack_confirmation@2        # used by rt_tldv_to_monday and rt_monday_review_to_slack
+  - ref: pt_grounded_monday_review@3    # used by rt_monday_review_to_slack
 
 routines:
-  - id: rt_tldv_to_monday
-    version: 2
-    pinned: true
-  - id: rt_slack_artifact_to_sheet
-    version: 1
-  - id: rt_monday_review_to_slack
-    version: 1
+  - ref: rt_tldv_to_monday@2
+  - ref: rt_slack_artifact_to_sheet@1
+  - ref: rt_monday_review_to_slack@1
+
+# Pin bindings carried by this manifest. Bindings are scoped, not statuses.
+# See docs/versioning.md §4.2.
+pin_bindings:
+  - scope: tenant:tenant_acme
+    routine_ref: rt_tldv_to_monday@2
+    reason: "tenant_acme is in the v3 evaluation window; hold them at v2"
 
 policies:
-  - id: pol_external_customer_writes
-    version: 3
-  - id: pol_default_pii
-    version: 7
-  - id: pol_egress_third_party
-    version: 2
+  - ref: pol_external_customer_writes@3
+  - ref: pol_default_pii@7
+  - ref: pol_egress_third_party@2
 
 tool_plan:
-  id: tp_acme_2026_q2
-  version: 4
+  ref: tp_acme_2026_q2@4
 
 evaluator:
   criteria_suites:
-    - id: cs_tldv_to_monday
-      version: 4
-    - id: cs_slack_artifact_to_sheet
-      version: 2
-    - id: cs_monday_review_to_slack
-      version: 1
+    - ref: cs_tldv_to_monday@4
+    - ref: cs_slack_artifact_to_sheet@2
+    - ref: cs_monday_review_to_slack@1
 
 created_at: "2026-05-15T09:00:00Z"
 created_by:
   kind: human
   id: U07RELEASE
 notes_for_humans: |
-  Adds pol_external_customer_writes v3 (was v2) — tightens agentic judge prompt.
-  Pins rt_tldv_to_monday at v2 because tenant_acme is in the v3 evaluation window.
+  Adds pol_external_customer_writes@3 (was @2) — tightens agentic judge prompt.
+  Holds rt_tldv_to_monday@2 for tenant_acme via a pin binding because that tenant
+  is in the @3 evaluation window.
