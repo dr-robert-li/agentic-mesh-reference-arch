@@ -1,0 +1,82 @@
+# Illustrative, not normative. The routine distilled from successful runs of Workflow A
+# (tl;dv -> Monday.com). After two successful runs, the Planner proposed this routine;
+# a human accepted it; it is now pinned at v2 for tenant_acme.
+
+routine_id: rt_tldv_to_monday
+version: 2
+tenant_scope: tenant_acme
+title: tl;dv recording -> Monday.com task
+intent: |
+  Given a tl;dv recording URL and a target Monday.com board, extract action items
+  from the transcript and create a single Monday.com item representing them,
+  confirming via Slack in the originating thread.
+
+entrypoint_shape:
+  required:
+    - tldv_recording_url
+    - monday_board_name_or_id
+    - slack_channel
+    - slack_thread_ts
+
+decomposition:
+  waves:
+    - index: 1
+      subtasks:
+        - intent: tldv.fetch_transcript
+          tool_tier: read_sensitive
+        - intent: monday.boards.resolve
+          tool_tier: read_safe
+    - index: 2
+      subtasks:
+        - intent: agent.extract_action_items
+          model_tier: M
+          prompt_ref: pt_extract_action_items@5
+    - index: 3
+      subtasks:
+        - intent: monday.items.create
+          tool_tier: write_revocable
+          idempotency: "${task_id}:w3:s1"
+    - index: 4
+      subtasks:
+        - intent: slack.chat.postMessage
+          tool_tier: write_revocable
+
+tool_intents:
+  - tldv.fetch_transcript
+  - monday.boards.resolve
+  - monday.items.create
+  - slack.chat.postMessage
+
+output_schema:
+  type: object
+  required: [monday_item_url, slack_confirmation_ts]
+  properties:
+    monday_item_url: {type: string}
+    slack_confirmation_ts: {type: string}
+
+prompt_refs:
+  - pt_extract_action_items@5
+  - pt_slack_confirmation@2
+
+policy_refs:
+  - pol_external_customer_writes@3
+  - pol_default_pii@7
+
+evaluator_refs:
+  - cs_tldv_to_monday@4
+
+status: pinned    # tenant_acme has pinned v2; later versions exist as proposed
+
+provenance:
+  origin: distilled_from_task
+  source_tasks:
+    - task_01HXFIRSTRUN
+    - task_01HXSECONDRUN
+  authored_by:
+    kind: human
+    id: U07PROJLEAD
+  prior_version: 1
+
+created_at: "2026-05-02T14:21:00Z"
+accepted_at: "2026-05-03T09:00:00Z"
+pinned_at:   "2026-05-09T10:00:00Z"

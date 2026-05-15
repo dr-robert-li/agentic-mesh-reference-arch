@@ -1,0 +1,78 @@
+# Illustrative, not normative. The tool plan that powers Workflows A, B, and C for tenant_acme.
+# Credentials are referenced by alias only. The Tool Gateway resolves aliases at call time.
+
+tool_plan_id: tp_acme_2026_q2
+version: 4
+tenant_id: tenant_acme
+status: active
+
+default_pack:
+  - tool_id: mcp.gateway
+    tier: read_safe
+    credential_alias: mcp_default
+    enabled: true
+
+  - tool_id: google.drive.files.fetch
+    tier: read_sensitive
+    credential_alias: gws_acme_service
+    enabled: true
+    policy_refs: [pol_default_pii@7]
+
+  - tool_id: google.sheets.create_with_data
+    tier: write_revocable
+    credential_alias: gws_acme_service
+    enabled: true
+    quota: {window: "1h", max_calls: 200}
+
+  - tool_id: slack.chat.postMessage
+    tier: write_revocable
+    credential_alias: slack_acme_bot
+    enabled: true
+    quota: {window: "1m", max_calls: 60}
+
+client_pack:
+  - tool_id: tldv.fetch_transcript
+    tier: read_sensitive
+    credential_alias: tldv_acme
+    enabled: true
+    policy_refs: [pol_default_pii@7]
+
+  - tool_id: monday.boards.resolve
+    tier: read_safe
+    credential_alias: monday_acme
+    enabled: true
+
+  - tool_id: monday.items.fetch_with_history
+    tier: read_sensitive
+    credential_alias: monday_acme
+    enabled: true
+
+  - tool_id: monday.items.create
+    tier: write_revocable
+    credential_alias: monday_acme
+    enabled: true
+    policy_refs: [pol_external_customer_writes@3]
+    quota: {window: "1h", max_calls: 50}
+
+  # Examples of higher-tier tools present but gated heavily.
+  - tool_id: stripe.charges.refund
+    tier: write_destructive
+    credential_alias: stripe_acme
+    enabled: true
+    policy_refs: [pol_destructive_writes_require_hitl@1]
+
+  - tool_id: bigquery.query
+    tier: read_sensitive
+    credential_alias: bq_acme
+    enabled: true
+    policy_refs: [pol_egress_third_party@2]
+
+  - tool_id: twilio.sms.send
+    tier: write_destructive
+    credential_alias: twilio_acme
+    enabled: false   # not yet onboarded
+
+created_at: "2026-04-10T00:00:00Z"
+notes_for_humans: |
+  v4 enables monday.items.fetch_with_history for Workflow C and adds the
+  pol_external_customer_writes ref to monday.items.create.

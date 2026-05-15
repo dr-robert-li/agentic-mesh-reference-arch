@@ -1,0 +1,55 @@
+# Illustrative, not normative. A hybrid policy that gates writes to Monday.com
+# for boards tagged "external-customer" behind HITL approval.
+
+policy_id: pol_external_customer_writes
+version: 3
+tenant_scope: tenant_acme
+title: External-customer Monday writes require HITL
+intent: |
+  Any write operation against a Monday.com board carrying the "external-customer"
+  tag must be approved by the project lead before execution. This protects
+  customer-visible state from accidental agent writes.
+
+enforcement_mode: hybrid
+
+# Deterministic prefilter — cheap, decides clear cases.
+rule:
+  all_of:
+    - field: tool_call.tool_id
+      starts_with: "monday."
+    - field: tool_call.tier
+      in: ["write_revocable", "write_destructive"]
+    - field: tool_call.target.board_tags
+      contains: "external-customer"
+
+# Agentic judge — only invoked when prefilter is ambiguous (e.g. board tags missing).
+agent_prompt: |
+  You are reviewing a proposed Monday.com write. Decide whether the target board
+  is customer-facing based on its name, tags, and recent activity. Return one of:
+  allow, require_hitl, deny — with a one-sentence reason.
+
+triggers:
+  - pre_tool_call
+
+on_violation: require_hitl
+
+hitl:
+  channel: "slack:DM:${policy.approver_slack_id}"
+  approver: "U07PROJLEAD"
+  notification_template: |
+    Approval needed for Monday.com write on board "${target.board_name}"
+    initiated by ${actor.display_name} via ${entrypoint} at ${timestamp}.
+    Proposed payload: ${payload_summary}
+    Recommended action: ${recommended_action}
+
+provenance:
+  authored_by:
+    kind: human
+    id: U07PROJLEAD
+  source_document: "drive://acme/sop/external-customer-writes-v3.md"
+  prior_version: 2
+
+status: active
+created_at: "2026-04-30T09:00:00Z"
+accepted_at: "2026-05-01T11:14:00Z"
+deprecated_at: null
