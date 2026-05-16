@@ -1,0 +1,71 @@
+# Illustrative, not normative. A conservative autonomy policy for tenant_acme that
+# caps dynamic spawning and recursion for the default routine class. Per-routine,
+# per-actor, or per-risk-tier overrides can lower or raise these limits — the most
+# restrictive value wins at resolution time.
+#
+# See docs/governance.md §8 for the field definitions and docs/swarm-supervisor.md
+# §3 for how the Swarm Supervisor consumes this budget.
+
+policy_id: pol_autonomy_default
+version: 1
+tenant_scope: tenant_acme
+title: Default conservative autonomy budget
+intent: |
+  Bound dynamic spawning and recursion for V1. The defaults below apply to every
+  Task in tenant_acme unless a narrower scope (per-routine, per-actor, per-risk-tier,
+  per-entrypoint, or per-tool-plan) sets a more restrictive value.
+
+enforcement_mode: deterministic
+
+rule:
+  autonomy_budget:
+    max_waves: 3
+    max_child_agents_per_wave: 5
+    recursion_enabled: true
+    max_recursion_depth: 1                # V1 conservative default; see orchestration.md §3.2.
+    max_wall_clock_minutes: 30
+    max_tool_calls: 50
+    max_model_calls: 25
+    max_token_budget: 250000
+    external_write_tier_limit: ["read_safe", "read_sensitive", "write_revocable"]
+    auto_candidate_creation_allowed: true
+    min_confidence_to_spawn: 0.7
+    max_total_spawns: 50                  # runaway-swarm cutoff (kill switch)
+
+# Scope overrides that may apply on top of the tenant default.
+# Resolution: most restrictive value wins per field (see governance.md §8).
+scope_overrides:
+  - match:
+      risk_tier: high
+    autonomy_budget:
+      max_recursion_depth: 0              # high-risk routines: no recursion
+      max_child_agents_per_wave: 2
+      external_write_tier_limit: ["read_safe", "read_sensitive"]
+  - match:
+      routine_id: rt_tldv_to_monday
+    autonomy_budget:
+      max_waves: 4                        # this routine legitimately needs a fourth wave for confirmation
+  - match:
+      actor.kind: agent
+      actor.trust: junior
+    autonomy_budget:
+      max_recursion_depth: 0
+      auto_candidate_creation_allowed: false
+
+triggers:
+  - on_task_create
+  - pre_spawn                             # supervisor consults this before every expansion
+
+on_violation: require_hitl
+
+provenance:
+  authored_by:
+    kind: human
+    id: U07PROJLEAD
+  source_document: "drive://acme/sop/autonomy-budgets-v1.md"
+  prior_version: null
+
+status: active
+created_at: "2026-05-16T09:00:00Z"
+accepted_at: "2026-05-16T09:30:00Z"
+deprecated_at: null

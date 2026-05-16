@@ -5,6 +5,95 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 uses [Semantic Versioning](https://semver.org/) for the **documentation** itself
 (the implementing platform will track its own version).
 
+## [0.1.2] — 2026-05-16
+
+Documentation patch introducing the contractual **Swarm Supervisor** and closing
+gaps in dynamic spawning, autonomy budgets, recursion semantics, and the candidate
+lifecycle. Reference architecture only — no runnable code. Preserves v0.1.1 shape and
+state-machine semantics; tightens the contract around autonomy and candidate
+management.
+
+### Added
+- `docs/swarm-supervisor.md`: new document defining the Swarm Supervisor as a
+  contractual control component for dynamic spawning. Covers V1 wave-based default,
+  recursion semantics (enabled by default, bounded by depth/budget/policy), the
+  five-step spawn gate (policy / budget / risk / provenance / marginal utility), the
+  spawn-ledger fields, HITL escalation triggers, kill-switch and DLQ behavior for
+  runaway swarms and poison-pill children, and the explicit statement that Temporal
+  (or any other durable-workflow engine) is an **implementation candidate** for the
+  control loop and **not itself the agent SDK**.
+- `docs/orchestration.md` §3.1: dynamic-spawning and recursion semantics that share
+  the existing wave machinery; recursion is allowed only inside policy / budget /
+  risk boundaries.
+- `docs/orchestration.md` §3.2: default conservative autonomy budget
+  (`max_waves: 3`, `max_child_agents_per_wave: 5`, `recursion_enabled: true`,
+  `max_recursion_depth: 1` with rationale, `max_total_spawns: 50`, with the explicit
+  note that wall-clock / tool / model / token budgets are user/policy configurable).
+- `docs/orchestration.md` §6.1: per-swarm-depth kill switch scope and runaway-swarm
+  cancellation semantics.
+- `docs/governance.md` §8: **autonomy policy fields** — `max_waves`,
+  `max_child_agents_per_wave`, `recursion_enabled`, `max_recursion_depth`,
+  `max_wall_clock_minutes`, `max_tool_calls`, `max_model_calls`, `max_token_budget`,
+  `external_write_tier_limit`, `auto_candidate_creation_allowed`,
+  `min_confidence_to_spawn`. Resolution rule: most-restrictive value wins across
+  task-type, tenant, actor, risk-tier, entrypoint, routine, and tool-plan scopes,
+  logged as `decision_kind: autonomy_budget_resolved`.
+- `docs/versioning.md` §4.3: **candidate lifecycle** with auto-creation, async/non-
+  blocking review, archive-before-hard-delete, and retention TTLs
+  (`candidate_review_ttl`, `archive_retention_ttl`, `duplicate_candidate_ttl`). Notes
+  this layered lifecycle is the mechanism that bounds candidate-variant explosion.
+- `docs/operations.md` §6 (added bullets): swarm/autonomy monitoring signals — spawn
+  count, recursion depth, wave count, budget-exhaustion rate by which budget tripped
+  first, HITL escalation rate by trigger, kill-switch events including runaway-swarm
+  cancellations, candidate growth rate by source, archive growth rate by reason.
+- `docs/operations.md` §7: garbage-collection policies for duplicate / unreviewed /
+  rejected / superseded candidates and for archived artifacts, with the explicit
+  archive-before-hard-delete invariant and a Decision-log entry per sweep
+  (`decision_kind: gc_swept`).
+- `AGENTS.md` §3: glossary entries for **Swarm Supervisor**, **Spawn ledger**,
+  **Autonomy budget**, **Recursion depth**.
+- `AGENTS.md` §4: new boundary row clarifying that the Swarm Supervisor decides
+  whether to spawn; routines/agents/executors may only *request* spawns.
+- `AGENTS.md` §5: anti-patterns 11–14 — no unbounded recursive spawning without
+  supervisor controls; every spawn must have a ledger entry written before the child
+  runs; no direct hard-delete (archive first); auto candidate creation is non-blocking
+  unless policy says otherwise; "dynamic spawning is only predefined templates" is
+  explicitly identified as incorrect and to be corrected on sight.
+- `AGENTS.md` §6.6: two new `grep` checks for stale dynamic-spawning claims and for
+  "unbounded recursion".
+- `README.md`: Swarm Supervisor surfaced as a first-class control-plane component;
+  control-plane Mermaid diagram updated; new §4.1 dynamic-spawning diagram (Slack /
+  API / MCP -> Task -> Swarm Supervisor -> waves / recursive children ->
+  governance / validator / evaluator -> outputs); repo map updated.
+- `examples/autonomy-policy.example.yaml`: a conservative tenant-scoped autonomy
+  budget with risk-tier, routine, and actor-trust overrides.
+- `examples/spawn-ledger.example.json`: one populated row of the spawn ledger,
+  including budgets, risk tier, depth, output contract, and provenance pointers.
+
+### Changed
+- `docs/architecture.md` §1, §3.2.1: Swarm Supervisor listed in the control plane,
+  with the explicit statement that it does not write Task `state` and does not invoke
+  tools directly. The control-plane Mermaid diagram includes the supervisor and its
+  consultation edge to Governance.
+- `examples/criterion.example.yaml`: added a `lifecycle` block with
+  `candidate_review_ttl_days`, `archive_retention_ttl_days`, and
+  `archive_before_hard_delete: true` to make the candidate-lifecycle contract
+  concrete on an existing example.
+
+### Fixed
+- No prior doc claimed "dynamic spawning is only predefined templates", but the
+  `grep` check added in §6.6 prevents this regression in future drops.
+
+### Known limitations of v0.1.2
+- Still no code, schemas in a typed language, or CI.
+- The spawn ledger is described as append-only and tenant-scoped; the storage
+  technology is left to the implementation.
+- Temporal is named as an implementation candidate for the supervisor's control
+  loop, but no Temporal-specific schema is provided — that belongs in the
+  implementation repo.
+- GraphQL entrypoint remains deferred; multi-region, fine-tuning, and a routine
+  marketplace remain out of scope.
+
 ## [0.1.1] — 2026-05-15
 
 Documentation patch addressing the second-pass docs QA council. Reference architecture

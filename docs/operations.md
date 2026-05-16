@@ -139,4 +139,61 @@ The minimum operational telemetry to track:
 - Duplicate-suppression rate.
 - Kill switch trips and DLQ depth.
 
+**Swarm / autonomy signals** (added in v0.1.2):
+
+- **Spawn count** per Task, per routine, per tenant, per day.
+- **Recursion depth** distribution per Task (max, p50, p95).
+- **Wave count** per Task; the share of Tasks that exhausted `max_waves`.
+- **Budget exhaustion rate** broken down by which budget tripped first
+  (`max_waves`, `max_child_agents_per_wave`, `max_wall_clock_minutes`,
+  `max_tool_calls`, `max_model_calls`, `max_token_budget`).
+- **HITL escalation rate** broken down by trigger (policy boundary, high risk,
+  budget exhaustion, low confidence, disagreement, external write, recursion
+  threshold, kill-switch). See [swarm-supervisor.md §6](swarm-supervisor.md).
+- **Kill-switch events** per scope (platform, tenant, routine, entrypoint, swarm
+  depth), including runaway-swarm cancellations.
+- **Candidate growth rate** — new candidates created per day, by source
+  (human, planner, evaluator, supervisor).
+- **Archive growth rate** — items moved to `archived` per day; the share that came
+  from "unreviewed past TTL" vs explicit rejection.
+
 In V1 these are exposed as API endpoints returning JSON. Dashboards belong to a later milestone.
+
+---
+
+## 7. Garbage collection of candidates and archived artifacts
+
+Automatic candidate creation (see [versioning.md §4.3](versioning.md)) means the
+candidate space grows continuously. A background GC sweep keeps it bounded.
+
+### 7.1 Policies
+
+| Class | Policy |
+|-------|--------|
+| **Duplicate candidates** | Within `duplicate_candidate_ttl`, identify near-duplicate candidates (same `routine_id`, structurally similar `decomposition` / `output_schema`). Keep the most provenance-rich; archive the rest. |
+| **Unreviewed candidates** | Candidates older than `candidate_review_ttl` with no acceptance event are moved `candidate -> archived` automatically. The owning channel is notified once. |
+| **Rejected candidates** | A candidate rejected by a human or by an auto-accept policy is moved directly to `archived` with a `rejected_by` provenance entry. |
+| **Superseded candidates** | When a newer candidate for the same routine reaches `active`, older `candidate` rows for that routine are archived. |
+| **Archived artifacts** | After `archive_retention_ttl`, an archived artifact becomes eligible for `prune`. Pruning writes a tombstone; the payload may be cold-stored or hard-deleted as the retention policy permits. |
+
+### 7.2 Archive-before-hard-delete
+
+This is invariant: **no artifact transitions directly from `active` or `candidate` to
+hard-deleted state.** The required path is `… -> archived -> pruned`. The GC sweep
+enforces this by refusing to skip the `archived` step even when the artifact has been
+unreviewed for far longer than the archive retention TTL.
+
+A policy may set `archive_retention_ttl` very short (e.g. one day) — that is allowed —
+but it cannot set it to `0` and it cannot bypass `archived`.
+
+### 7.3 Monitoring the GC sweep itself
+
+The GC sweep emits Decision-log entries (`decision_kind: gc_swept`) per run so an
+operator can answer:
+
+- How many duplicates were consolidated last night?
+- How many candidates aged out of review?
+- How many archived artifacts were pruned, and against which retention policy?
+
+These show up in the same canonical operator queries as kill-switch trips and
+DLQ depth.

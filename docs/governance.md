@@ -161,7 +161,68 @@ See [evaluator.md](evaluator.md) and [`examples/policy.example.yaml`](../example
 
 ---
 
-## 8. What governance is **not**
+## 8. Autonomy policies
+
+Governance also bounds **how much autonomy** a Task is allowed when the Swarm
+Supervisor proposes dynamic spawning or recursion. An autonomy policy is a regular
+policy (same fields as §1) whose `rule` carries an `autonomy_budget` block.
+
+| Field | Meaning |
+|-------|---------|
+| `max_waves` | Maximum number of waves the supervisor may schedule for a Task. |
+| `max_child_agents_per_wave` | Maximum sibling subtasks in a single wave. |
+| `recursion_enabled` | Boolean. If `false`, no child Task may spawn its own children. |
+| `max_recursion_depth` | Integer. Caps `depth + 1` for any spawn. V1 default is `1`. |
+| `max_wall_clock_minutes` | Wall-clock budget across the whole Task tree. |
+| `max_tool_calls` | Total tool calls (any tier) across the whole tree. |
+| `max_model_calls` | Total agent invocations across the whole tree. |
+| `max_token_budget` | Total tokens (prompt + completion) across the whole tree. |
+| `external_write_tier_limit` | The highest trust tier (set-membership ceiling) the supervisor may spawn into without HITL — e.g. `{read_safe, read_sensitive, write_revocable}`. |
+| `auto_candidate_creation_allowed` | Whether the supervisor may persist a candidate routine/criterion at the end of a successful expansion without HITL. Defaults to `true` for low-risk routines; review remains non-blocking (see [versioning.md §4.3](versioning.md)). |
+| `min_confidence_to_spawn` | Minimum self-reported confidence required from the spawning agent before the supervisor will dispatch the child. |
+
+Autonomy policies can **lower or raise** any limit by any of these scopes:
+
+- **Task type** — declared in the routine or inferred from `goal`.
+- **Tenant** — per-tenant ceilings; a tenant may permit deeper recursion than another.
+- **Actor** — per-user or per-agent ceilings (a junior internal agent gets a smaller
+  budget than a trusted service account).
+- **Risk tier** — risk-tier-based ceilings (e.g. high-risk routines are capped harder).
+- **Entrypoint** — Slack-originated work may be capped differently from API-originated
+  work.
+- **Routine** — per-routine overrides on top of the tenant default.
+- **Tool plan** — a tool plan that lacks certain tiers automatically lowers the
+  effective `external_write_tier_limit`.
+
+When multiple scopes apply to a single Task, the **most restrictive** value wins for
+each field. Resolution is deterministic and logged in the Decision log under
+`decision_kind: autonomy_budget_resolved` so the operator can see which scope clamped
+which field.
+
+```mermaid
+flowchart LR
+    SS[Spawn proposal] --> RES[Resolve autonomy policy]
+    RES --> S1[tenant default]
+    RES --> S2[actor override]
+    RES --> S3[routine override]
+    RES --> S4[risk-tier override]
+    RES --> S5[entrypoint override]
+    RES --> S6[tool-plan limit]
+    S1 --> MIN[Most-restrictive wins]
+    S2 --> MIN
+    S3 --> MIN
+    S4 --> MIN
+    S5 --> MIN
+    S6 --> MIN
+    MIN --> GATE[Spawn gate §3 of swarm-supervisor.md]
+```
+
+See [swarm-supervisor.md](swarm-supervisor.md) for how the supervisor consumes these
+fields and [orchestration.md §3.2](orchestration.md) for the V1 defaults.
+
+---
+
+## 9. What governance is **not**
 
 - It is not a workflow engine. Policies do not decide *what* to do; they decide *whether*.
 - It is not a rate limiter. Quotas live in the Tool Gateway.

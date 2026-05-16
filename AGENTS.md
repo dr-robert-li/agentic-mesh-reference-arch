@@ -33,8 +33,9 @@ When asked to "implement" something here:
 │   ├── task-contract.md            # the Task object, state machine, provenance
 │   ├── governance.md               # policies, enforcement, HITL, trigger phases
 │   ├── evaluator.md                # criteria, proposal-to-accept flow
-│   ├── orchestration.md            # state ownership, waves, dedup, kill switch, DLQ
-│   ├── versioning.md               # @version syntax, status vs ops, pin bindings, release manifests
+│   ├── orchestration.md            # state ownership, waves, recursion semantics, dedup, kill switch, DLQ
+│   ├── swarm-supervisor.md         # contractual dynamic spawning, autonomy budgets, spawn ledger, HITL escalations
+│   ├── versioning.md               # @version syntax, status vs ops, pin bindings, candidate lifecycle, release manifests
 │   ├── tool-plans.md               # trust tiers, credentials, default vs client packs
 │   ├── v1-dogfood-scenarios.md     # the three workflows + four cross-cutting scenarios
 │   └── operations.md               # five log streams, monitoring without a frontend
@@ -47,7 +48,9 @@ When asked to "implement" something here:
 │   ├── logs.example.json           # one sample line from each log stream
 │   ├── dedup-fingerprint.example.json
 │   ├── release-manifest.example.yaml
-│   └── tool-plan.example.yaml
+│   ├── tool-plan.example.yaml
+│   ├── autonomy-policy.example.yaml # a conservative autonomy budget
+│   └── spawn-ledger.example.json   # one row of the spawn ledger
 └── docs/proposals/                 # short proposals for cross-cutting changes (created on demand)
 ```
 
@@ -67,6 +70,10 @@ Use these terms exactly. Casing matters.
 | **Orchestrator** | Sole writer of Task `state`. |
 | **Planner / Decomposer** | Produces a plan (waves of subtasks) from a Task. Optional split. |
 | **Wave** | A parallel batch of sibling subtasks. |
+| **Swarm Supervisor** | Contractual control component that decides whether to spawn child agents/Tasks, runs the five-step spawn gate (policy / budget / risk / provenance / marginal utility), and writes every expansion to the spawn ledger. See [docs/swarm-supervisor.md](docs/swarm-supervisor.md). |
+| **Spawn ledger** | Append-only, per-tenant table with one row per supervisor-approved spawn. The substrate for the audit trail of dynamic spawning. |
+| **Autonomy budget** | The set of fields (`max_waves`, `max_child_agents_per_wave`, `recursion_enabled`, `max_recursion_depth`, `max_wall_clock_minutes`, `max_tool_calls`, `max_model_calls`, `max_token_budget`, `external_write_tier_limit`, `auto_candidate_creation_allowed`, `min_confidence_to_spawn`) that bound dynamic spawning for a Task. |
+| **Recursion depth** | `depth` field on a spawn-ledger row. Root Task has depth 0; each spawn increments depth on the child relative to its parent. |
 | **Governance** | The policy layer that decides *whether* a Task or step is allowed. |
 | **Policy** | A durable, versioned governance rule. |
 | **Policy Engine** | Enforces policies, deterministically or via an LLM judge. |
@@ -98,6 +105,7 @@ These boundaries are load-bearing. Crossing them silently breaks the audit chain
 | **Shape correctness** of inputs/outputs | **Contract Validator** | Evaluator, governance. (Shape failures revert state; meaning failures emit verdicts.) |
 | **Meaning correctness** of outputs | **Evaluator** | Validator (it only sees shape), governance (it decides *allowance*, not *quality*). |
 | **State transitions** on a Task | **Orchestrator** | Everyone else. Other components *recommend* transitions. |
+| **Whether to dynamically spawn** a child Task / agent | **Swarm Supervisor** (consulting Governance for the policy check) | Routines, agents, executors. They may *request* a spawn; the supervisor decides and writes the ledger row. |
 | **Routine lifecycle** (status + ops) | **Routine registry**, governed by [docs/versioning.md](docs/versioning.md) | Evaluator (it may propose; it does not promote). Policies (they may govern recall; they do not write rows). |
 | **Pinning** | **Pin-binding table**, scoped per §4.2 of versioning.md | The routine itself — pinning is not a status. |
 | **Credential resolution** | **Tool Gateway** | Agents, executors, prompts. Agents only ever see the credential **alias**. |
@@ -121,6 +129,10 @@ Do not:
 8. **Introduce a frontend.** V1 monitoring is Slack / API / MCP only.
 9. **Bundle V1 with later features.** GraphQL, marketplace, multi-region, fine-tuning are explicitly deferred.
 10. **Edit a versioned artifact in place.** All writes are new rows (`@n+1`). The persistence layer enforces this.
+11. **Implement unbounded recursive spawning.** Any dynamic spawning (including recursion through the MCP loopback entrypoint) must go through the Swarm Supervisor's five-step gate. Every spawned agent or child Task **must** have a spawn-ledger entry written *before* it runs. See [docs/swarm-supervisor.md](docs/swarm-supervisor.md).
+12. **Hard-delete a candidate, archived, or otherwise persisted artifact directly.** The lawful path is always `… -> archived -> pruned`. Skipping `archived` requires an explicit retention policy override and is logged as a deviation. See [docs/versioning.md §4.3](docs/versioning.md) and [docs/operations.md §7](docs/operations.md).
+13. **Block a Task on automatic candidate creation.** Automatic candidate creation (by Planner, Evaluator, or Swarm Supervisor) is asynchronous and non-blocking unless an autonomy policy explicitly says otherwise. The Task does not pause to wait for a human to review the candidate.
+14. **Claim dynamic spawning is limited to predefined templates.** It is not. Dynamic spawning is contractual, policy-bounded, and goes through the Swarm Supervisor. Documentation that asserts otherwise must be corrected when discovered.
 
 ---
 
@@ -161,6 +173,8 @@ This repo has no test suite (it is documentation). The equivalent gates are:
    - `grep -rn "tool\.tier *> *read_safe" docs/` → must return empty.
    - `grep -rn "\"graphql\"" examples/` → must return empty (the string `graphql` may appear in docs as a deferred-entrypoint reference only).
    - `grep -rn "docs/proposals" .` → if matched, the directory must exist.
+   - `grep -rn "dynamic spawning is .*predefined templates" docs/ examples/` → must return empty (dynamic spawning is contractual and policy-bounded, not template-only).
+   - `grep -rn "unbounded recurs" docs/ examples/` → must return empty unless prefixed by "no" / "not" (the architecture forbids unbounded recursion).
 2. **Every doc change touches its examples.** If you add a Task field, update `examples/task.example.json`. If you add a routine op, update `examples/routine.example.yaml`.
 3. **Every new state, enum value, or top-level concept gets a `docs/proposals/<slug>.md` entry first.** That file is a short markdown describing the change, the affected docs, and the migration story. After review, the proposal is merged into the affected docs and the proposal file is deleted in the same commit.
 4. **`CHANGELOG.md` entry** under `## [Unreleased]` for any change that is not a typo or formatting fix.
@@ -232,6 +246,7 @@ If the user's instruction directly contradicts a rule in this file:
 - V1 scope: [docs/v1-dogfood-scenarios.md](docs/v1-dogfood-scenarios.md)
 - Governance and evaluation: [docs/governance.md](docs/governance.md), [docs/evaluator.md](docs/evaluator.md)
 - State machine and concurrency: [docs/orchestration.md](docs/orchestration.md)
+- Dynamic spawning / autonomy: [docs/swarm-supervisor.md](docs/swarm-supervisor.md)
 - Versioning model: [docs/versioning.md](docs/versioning.md)
 - Tool plans and credentials: [docs/tool-plans.md](docs/tool-plans.md)
 - Operations / monitoring: [docs/operations.md](docs/operations.md)

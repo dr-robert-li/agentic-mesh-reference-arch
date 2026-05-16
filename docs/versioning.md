@@ -166,6 +166,67 @@ flowchart LR
 
 ---
 
+### 4.3 Candidate lifecycle (auto-creation, async review, archival)
+
+Candidates can be created in two ways:
+
+1. **By a human** — through the API, Slack, or by uploading a document; the candidate
+   enters `status: candidate` for review.
+2. **Automatically** — at the end of a successful run, the Planner, Evaluator, or the
+   Swarm Supervisor (when an expansion produces a reusable pattern) may persist a
+   candidate variant. Automatic creation is gated by the
+   `auto_candidate_creation_allowed` field on the resolved autonomy policy (see
+   [governance.md §8](governance.md)).
+
+**Review is asynchronous and non-blocking.** A candidate exists for humans (or
+policies authorized to auto-accept) to act on at their convenience. The Task that
+created the candidate does **not** pause — it has already terminated by the time the
+candidate is written. This is the same rule as for evaluator-proposed criteria
+([task-contract.md §2.1](task-contract.md)).
+
+The candidate lifecycle, end-to-end:
+
+```mermaid
+stateDiagram-v2
+    [*] --> candidate : auto-created or submitted
+    candidate --> active : reviewed + approved
+    candidate --> active : promoted (versioned @1)
+    candidate --> archived : rejected
+    candidate --> archived : unreviewed past TTL
+    active --> deprecated : superseded
+    deprecated --> archived
+    archived --> pruned : hard delete past retention TTL
+```
+
+**Retention windows are policy-driven, not hard-coded.**
+
+| TTL | What it controls | Suggested conservative default |
+|-----|------------------|--------------------------------|
+| `candidate_review_ttl` | How long an unreviewed/unapproved candidate may remain in `candidate` status before being moved to `archived`. | 30 days. |
+| `archive_retention_ttl` | How long an `archived` artifact is retained before automated pruning may hard-delete it. | 180 days. |
+| `duplicate_candidate_ttl` | How long near-duplicate candidates may coexist before the GC sweep consolidates them (keeps the most provenance-rich, archives the rest). | 7 days. |
+
+The defaults are suggested; the tenant's autonomy policy or a dedicated retention
+policy may raise or lower them. **`archive_retention_ttl` must be ≥
+`candidate_review_ttl`** to preserve the archive-before-hard-delete invariant.
+
+**Archive before hard delete.** No candidate (or any other dynamic artifact) is ever
+hard-deleted directly. The lawful path is always `… -> archived -> pruned`. Hard
+deletion is the `pruned` op writing a tombstone *after* the archive retention TTL has
+elapsed and a retention policy explicitly permits hard removal of cold-stored payload.
+
+**Why this matters.** Automated candidate creation, combined with multiple tenants and
+recursive expansion, produces a rapidly growing candidate space. Without explicit
+review TTLs, archive TTLs, and a deterministic archive-before-delete invariant, the
+candidate space exhibits **variant explosion** — many near-duplicate routines and
+criteria diverging across scopes, none of them clearly canonical. The layered
+lifecycle (auto-create -> async review -> approve/archive -> prune) is the mechanism
+that bounds this explosion.
+
+See [operations.md §7](operations.md) for the GC sweep and monitoring signals.
+
+---
+
 ## 5. Release manifests
 
 A **release manifest** is the pinning record. Every Task carries a `release_manifest_id` — that ID resolves to *exactly* which version of every dependency the Task runs against.

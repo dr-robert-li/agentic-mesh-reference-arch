@@ -51,6 +51,56 @@ Properties:
 - If any subtask fails irrecoverably, the Orchestrator decides between: cancel the rest, let the rest complete and report, or backtrack and re-plan.
 - The Evaluator runs at wave boundaries.
 
+### 3.1 Dynamic spawning and recursion
+
+A wave is **static** when its subtasks are declared up front by a recalled routine or
+the Planner. A wave is **dynamic** when the Swarm Supervisor decides at runtime to
+expand the plan (add a new wave, or have a child agent recurse and spawn its own
+children). Both cases use the same wave machinery; the difference is *who* declared
+the contents.
+
+Semantics:
+
+- **Wave-based dynamic spawning** is the V1 default. After each wave completes, the
+  supervisor may propose a next wave or a recursive expansion. The Orchestrator
+  schedules it only if the supervisor's gate (policy / budget / risk / provenance /
+  marginal utility — see [swarm-supervisor.md §3](swarm-supervisor.md)) passes.
+- **Recursion is enabled by default**, but only inside the autonomy policy in scope.
+  A spawn whose `depth + 1` exceeds `policy.max_recursion_depth` is rejected.
+- Recursion can **only** occur inside policy, budget, and risk boundaries. Any one of
+  them denies; all of them must permit. This rules out the case where a generous
+  recursion limit is silently combined with an exhausted token budget.
+- A child Task inherits the parent's `release_manifest_id`, `tool_plan_id`, and
+  `tenant_id`, and consumes a *fraction* of the parent's remaining budget — never the
+  full budget.
+
+### 3.2 Default conservative autonomy budget
+
+The defaults below are deliberately small. Policy at any of the scopes in
+[governance.md §9](governance.md) can raise or lower them.
+
+```yaml
+autonomy_budget:
+  max_waves: 3
+  max_child_agents_per_wave: 5
+  recursion_enabled: true
+  max_recursion_depth: 1            # rationale: V1 prefers shallow expansion; deeper
+                                    # recursion is opt-in per tenant/routine because
+                                    # blast radius grows multiplicatively with depth.
+  max_wall_clock_minutes: null      # user/policy configurable
+  max_tool_calls: null              # user/policy configurable
+  max_model_calls: null             # user/policy configurable
+  max_token_budget: null            # user/policy configurable
+  max_total_spawns: 50              # runaway-swarm cutoff (see kill switch §6)
+```
+
+A populated, illustrative budget is in
+[`examples/autonomy-policy.example.yaml`](../examples/autonomy-policy.example.yaml).
+
+**All thresholds are user/policy configurable.** The Orchestrator enforces whatever
+the resolved autonomy policy says; the defaults above only apply when no policy at any
+scope sets a value.
+
 ---
 
 ## 4. Duplicate request detection
@@ -144,11 +194,15 @@ silent corruption when the platform itself is updated.
 ## 6. Kill switch and DLQ
 
 ### 6.1 Kill switch
-A platform-wide and per-routine kill switch. When tripped:
+A platform-wide, per-routine, per-tenant, per-entrypoint, or **per-swarm-depth** kill
+switch. When tripped:
 
 - New Tasks targeting the scoped routine/policy/tenant are rejected at the entrypoint with a clear reason.
 - In-flight Tasks transition to `CANCELLED` at the next wave boundary.
 - The decision is logged with actor, timestamp, and reason; restoring service is also logged.
+- A **runaway swarm** — a Task whose spawn-ledger row count exceeds `max_total_spawns` —
+  is cancelled via the same machinery, with `state_reason: runaway_swarm`. See
+  [swarm-supervisor.md §7](swarm-supervisor.md).
 
 ### 6.2 Poison-pill / DLQ
 A message is a **poison pill** if it repeatedly causes the same executor to fail in a way step-local retries cannot recover.

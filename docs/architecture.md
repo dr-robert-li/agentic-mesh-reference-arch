@@ -11,7 +11,7 @@ The mesh has four planes:
 | Plane | Purpose | Key components |
 |-------|---------|----------------|
 | **Entry** | Receive intent from humans or other agents | Slack app, REST API, MCP server; GraphQL is a deferred future entrypoint |
-| **Control** | Decide *what* should happen and *whether* it is allowed | Orchestrator, Planner/Decomposer, Governance, Evaluator, Contract Validator, Routine & Release Registry |
+| **Control** | Decide *what* should happen and *whether* it is allowed | Orchestrator, Planner/Decomposer, **Swarm Supervisor**, Governance, Evaluator, Contract Validator, Routine & Release Registry |
 | **Execution** | Do the work | Executor abstraction, Agent runners (model cascade), Tool Gateway |
 | **Persistence & Telemetry** | Durable state and observability | Task store, Policy store, Routine store, Log streams |
 
@@ -26,6 +26,7 @@ flowchart LR
     subgraph Control
         ORCH[Orchestrator]
         PLAN[Planner]
+        SS[Swarm Supervisor]
         GOV[Governance]
         EVAL[Evaluator]
         VAL[Validator]
@@ -45,6 +46,8 @@ flowchart LR
 
     Entry --> ORCH
     ORCH <--> PLAN
+    ORCH <--> SS
+    SS <--> GOV
     ORCH <--> GOV
     ORCH <--> VAL
     ORCH --> EXEC
@@ -105,6 +108,26 @@ See [orchestration.md](orchestration.md) for full details.
 ### 3.2 Planner / Decomposer
 - Takes a goal-shaped Task and produces a plan: a DAG of subtasks with declared tool intent, governance scope, and expected output shape.
 - **Optional split:** in V1 this may be a single agent invocation inside the Orchestrator. Promotion to a standalone service is a later step when planning becomes too coupled to model upgrades.
+
+### 3.2.1 Swarm Supervisor
+
+- **Contractual control component** for dynamic spawning of child agents and child Tasks.
+- V1 default behavior is **wave-based dynamic spawning**; recursion is enabled by
+  default but constrained by a conservative `max_recursion_depth` and the autonomy
+  policy in scope.
+- Every spawn passes a five-step gate (policy / budget / risk / provenance / marginal
+  utility) and is recorded in an append-only **spawn ledger** before the child runs.
+- The supervisor never writes Task `state` (the Orchestrator does) and never invokes
+  tools directly (the Executor does); its single output is the decision to spawn (or
+  not) plus a ledger row.
+- A durable-workflow engine such as **Temporal** is a reasonable implementation
+  candidate for the supervisor's control loop. The supervisor is the *contract* —
+  Temporal (or any other engine) is one possible implementation. Temporal is **not**
+  itself the agent SDK.
+
+See [swarm-supervisor.md](swarm-supervisor.md) for the spawn gate, ledger fields,
+recursion semantics, HITL escalation triggers, and kill-switch behavior for runaway
+swarms.
 
 ### 3.3 Governance / Policy Engine
 - Policies live in the Policy store, are durable, versioned, and identified.

@@ -28,6 +28,14 @@ status: candidate         # not yet accepted; the Task did NOT pause for this
 accepted_by: null
 accepted_at: null
 
+# Candidate lifecycle TTLs (see docs/versioning.md §4.3).
+# Unreviewed candidates age into `archived` past `candidate_review_ttl`.
+# Archived artifacts may be hard-deleted only after `archive_retention_ttl`.
+lifecycle:
+  candidate_review_ttl_days: 30
+  archive_retention_ttl_days: 180
+  archive_before_hard_delete: true
+
 provenance:
   origin: evaluator_proposed
   proposing_evaluation_id: ev_01HXYZ0099

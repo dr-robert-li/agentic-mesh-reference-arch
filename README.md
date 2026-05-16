@@ -21,6 +21,7 @@ The mesh is the middle path:
 - **Goals in, audited outcomes out.** Users state intent; the mesh plans, validates, executes, and evaluates.
 - **Governance is first-class.** Policies are persisted objects, versioned, enforced either deterministically or by an agent, and can be authored in natural language.
 - **The orchestrator is the source of truth.** State transitions live in one place; executors and agents are stateless workers.
+- **Dynamic spawning is contractual.** A **Swarm Supervisor** decides whether to expand a plan (wave-based by default; recursive within conservative depth/budget/risk limits) and writes every expansion to an append-only spawn ledger. Temporal or another durable-workflow engine is an implementation candidate for the control loop, not the agent SDK itself.
 - **Routines are data, not code.** Successful task patterns are captured as DB objects with manifests. Operations (`create`, `recall`, `update`, `pin`, `copy`, `deprecate`, `archive`, `prune`) are separate from version status (`draft`, `candidate`, `active`, `deprecated`, `archived`, `pruned`); pinning is a scoped binding, not a status.
 - **Evaluator catches "wrong but schema-valid".** Schemas check shape; evaluator checks meaning.
 
@@ -75,6 +76,7 @@ flowchart TB
         ING[Ingress &<br/>Auth / Tenancy]
         ORCH[Orchestrator<br/>state machine]
         PLAN[Planner / Decomposer<br/>optional split]
+        SS[Swarm Supervisor<br/>dynamic spawning,<br/>autonomy budgets,<br/>spawn ledger]
         GOV[Governance<br/>Policy Engine]
         EVAL[Evaluator]
         VAL[Contract<br/>Validator]
@@ -105,6 +107,8 @@ flowchart TB
     ING --> ORCH
 
     ORCH <--> PLAN
+    ORCH <--> SS
+    SS <--> GOV
     ORCH <--> GOV
     ORCH <--> EVAL
     ORCH <--> VAL
@@ -126,6 +130,34 @@ flowchart TB
     MCP -. loopback .-> API
 ```
 
+### 4.1 Dynamic spawning (wave-based, optionally recursive)
+
+The Swarm Supervisor expands a Task into waves of child agents, and — within conservative
+recursion limits — those children may spawn their own children. Every expansion goes
+through the supervisor's policy / budget / risk gate before any child runs, and is
+recorded in the spawn ledger. See [docs/swarm-supervisor.md](docs/swarm-supervisor.md).
+
+```mermaid
+flowchart LR
+    IN[Slack / API / MCP] --> T[Task]
+    T --> SS[Swarm Supervisor]
+    SS -->|wave 1| W1[Child agents<br/>parallel]
+    SS -->|wave 2 / recursion<br/>within depth + budget| W2[Child agents<br/>may spawn children]
+    W1 --> GOV[Governance]
+    W2 --> GOV
+    W1 --> VAL[Validator]
+    W2 --> VAL
+    W1 --> EV[Evaluator]
+    W2 --> EV
+    GOV --> OUT[Outputs]
+    VAL --> OUT
+    EV --> OUT
+```
+
+Temporal (or any other durable-workflow engine) is a reasonable **implementation
+candidate** for the supervisor's control loop. The supervisor itself is a contract, not
+an agent SDK.
+
 ---
 
 ## 5. Repository map
@@ -140,11 +172,12 @@ flowchart TB
 │   ├── task-contract.md            # the canonical Task object and its lifecycle
 │   ├── governance.md               # policies, authoring, enforcement, HITL
 │   ├── evaluator.md                # evaluation criteria, proposal-to-accept flow
-│   ├── orchestration.md            # state transitions, retries, waves, versioning, kill switch
-│   ├── versioning.md               # git-tagged platform vs DB-persisted routines, release manifests
+│   ├── orchestration.md            # state transitions, retries, waves, recursion semantics, kill switch
+│   ├── swarm-supervisor.md         # contractual dynamic spawning, autonomy budgets, spawn ledger
+│   ├── versioning.md               # git-tagged platform vs DB-persisted routines, candidate lifecycle, release manifests
 │   ├── tool-plans.md               # tool trust tiers, credentials, per-client packs
 │   ├── v1-dogfood-scenarios.md     # the three workflows + cross-cutting scenarios
-│   └── operations.md               # logging, monitoring, kill switch, DLQ
+│   └── operations.md               # logging, monitoring, GC of candidates/archives, kill switch, DLQ
 ├── examples/
 │   ├── task.example.json           # a populated Task object
 │   ├── policy.example.yaml         # a governance policy with evaluator options
@@ -154,7 +187,9 @@ flowchart TB
 │   ├── logs.example.json           # one entry per log stream
 │   ├── dedup-fingerprint.example.json
 │   ├── release-manifest.example.yaml
-│   └── tool-plan.example.yaml
+│   ├── tool-plan.example.yaml
+│   ├── autonomy-policy.example.yaml # conservative autonomy budget defaults
+│   └── spawn-ledger.example.json   # one row of the spawn ledger
 └── docs/proposals/                 # short proposals for cross-cutting changes
 ```
 
@@ -169,7 +204,7 @@ Read in this order if you are new:
 3. `docs/task-contract.md` — the one object you must understand.
 4. `docs/v1-dogfood-scenarios.md` — what we are building first.
 5. `docs/governance.md`, `docs/evaluator.md` — the two layers that make this safe.
-6. `docs/orchestration.md`, `docs/versioning.md` — how it stays correct under change.
+6. `docs/orchestration.md`, `docs/swarm-supervisor.md`, `docs/versioning.md` — how it stays correct under change.
 7. `docs/tool-plans.md`, `docs/operations.md` — how it stays correct under load.
 8. `examples/` — concrete shapes.
 
@@ -179,4 +214,7 @@ For coding agents implementing the system, start at `AGENTS.md`.
 
 ## 7. Status
 
-This is **v0.1.0**, the initial documentation drop. No code is included. See `CHANGELOG.md`.
+This is **v0.1.2**, a documentation-only patch introducing the contractual Swarm
+Supervisor concept, wave-based dynamic spawning, recursion within conservative
+autonomy budgets, candidate-lifecycle clarifications, and GC policies for unreviewed /
+archived artifacts. No code is included. See `CHANGELOG.md`.

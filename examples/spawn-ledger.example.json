@@ -1,0 +1,41 @@
+{
+  "_comment": "Illustrative, not normative. One row of the spawn ledger written by the Swarm Supervisor before a child agent is dispatched. See docs/swarm-supervisor.md §4 for field definitions.",
+  "spawn_id": "spn_01HXSPAWN0001",
+  "tenant_id": "tenant_acme",
+  "parent_task_id": "task_01HXPARENT0001",
+  "parent_agent_id": "agent_planner_v3",
+  "child_task_id": "task_01HXCHILD0001",
+  "child_agent_role": "extractor",
+  "reason": "Wave 2 evaluation flagged that action items were under-extracted from the tl;dv transcript. Spawning an extractor with a tighter prompt is expected to recover the missing items at marginal cost; the alternative (terminating the wave) would force a manual retry.",
+  "model_tier": "M",
+  "tools": [
+    {"tool_id": "tldv.fetch_transcript", "tier": "read_sensitive"},
+    {"tool_id": "agent.extract_action_items", "tier": "read_safe"}
+  ],
+  "budgets": {
+    "allocated_max_waves": 1,
+    "allocated_max_child_agents_per_wave": 2,
+    "allocated_max_tool_calls": 8,
+    "allocated_max_model_calls": 4,
+    "allocated_max_token_budget": 40000,
+    "allocated_max_wall_clock_minutes": 5
+  },
+  "risk_tier": "low",
+  "wave_index": 2,
+  "depth": 1,
+  "output_contract": "rt_tldv_to_monday@2/output_schema",
+  "disposition": "running",
+  "release_manifest_id": "rm_2026_05_15_a",
+  "provenance": {
+    "parent_decision_log_entry_id": "dec_01HXDEC00099",
+    "spawning_agent_prompt_ref": "pt_supervisor_marginal_utility@2",
+    "policy_refs": [
+      "pol_autonomy_default@1",
+      "pol_external_customer_writes@3"
+    ],
+    "evaluation_log_entry_id": "ev_01HXEV00041"
+  },
+  "created_at": "2026-05-16T10:33:00Z",
+  "updated_at": "2026-05-16T10:33:00Z",
+  "closed_at": null
+}
