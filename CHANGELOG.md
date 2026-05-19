@@ -5,6 +5,140 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 uses [Semantic Versioning](https://semver.org/) for the **documentation** itself
 (the implementing platform will track its own version).
 
+## [0.1.3] — 2026-05-19
+
+Documentation patch introducing the **Context and Evidence Knowledge Layer**, the
+**Intake** layer, and the eight **deterministic egress guards** that run inside the
+Orchestrator. Reference architecture only — no runnable code. Strictly additive:
+no new required Task fields, no new Task lifecycle states, no new entrypoint enum
+values, no new trust tiers. The set of `entrypoint` values is unchanged
+(`slack | api | mcp | internal`); the set of Task `state` values is unchanged from
+v0.1.2; the trust-tier enum is unchanged from v0.1.0.
+
+### Added
+- `docs/knowledge-layer.md`: defines the Context and Evidence Knowledge Layer as a
+  tenant-scoped cache, index, and evidence-pointer layer — **not** a system of
+  record. Covers the read/write/freshness/tenancy contract, the claim-evidence
+  sidecar schema, the eight deterministic egress guards (schema, claim-evidence
+  map, evidence resolvability, freshness, source authority, tenancy,
+  tier-and-policy, budget), the egress-only verification rule, the state-pointer
+  pattern, budget propagation via `evidence_fetch_budget`, and correlation
+  telemetry.
+- `docs/intake.md`: defines the canonical intake schema and the cheap S-tier
+  feasibility check. Input contract is formed at intake, before the Orchestrator
+  creates a Task. Feasibility verdicts are `feasible | ambiguous | infeasible` and
+  intake **must not silently escalate above the S tier**.
+- `examples/claim-evidence-map.example.json`: a populated claim-evidence sidecar.
+- `examples/intake.example.json`: a populated intake artifact for Workflow A.
+- `examples/knowledge-layer-read.example.json`: one read against the Knowledge
+  Layer with freshness verdict and `is_authoritative_for[]` declaration.
+- `examples/egress-check.example.json`: the eight-guard egress check record,
+  including a `require_hitl` outcome from guard 7 (tier-and-policy).
+- `docs/architecture.md` §1, §2.3, §3.7, §5.1: Intake under the Entry plane,
+  Knowledge Layer under Persistence & Telemetry, Egress Guards inside the
+  Orchestrator at the `pre_egress` trigger phase. The control-plane Mermaid and
+  the end-to-end sequence diagrams now include Intake, the Knowledge Layer, and
+  the egress-check step.
+- `docs/task-contract.md` §1: three optional fields on the Task contract —
+  `intake_id`, `correlation_id`, `claim_evidence_map_ref`. All optional; no
+  breaking change.
+- `docs/task-contract.md` §3 transition rule 6: deterministic egress check is
+  non-state-changing; a guard failure either reverts the wave or escalates to
+  `AWAITING_HITL` with `hitl.from_state = EGRESS_CHECK` recorded as a sub-phase
+  of `EXECUTING`. The set of Task `state` values is unchanged.
+- `docs/task-contract.md` §5: new provenance kinds `intake`, `evidence`, and
+  `egress_check`.
+- `docs/governance.md` §2.1: the eight deterministic egress guards run inside the
+  `pre_egress` trigger phase; cheap deterministic checks before any agentic
+  `pre_egress` policy.
+- `docs/governance.md` §6: HITL flow now records `hitl.from_state = EGRESS_CHECK`
+  when an egress guard or an agentic `pre_egress` policy escalates.
+- `docs/governance.md` §8: new autonomy-budget field `evidence_fetch_budget`
+  (`max_reads`, `max_refetches`, `max_stale_acceptance`), consumed by egress
+  guard 8.
+- `docs/evaluator.md` §6: explicit three-way clarification between Validator
+  (shape), Egress Guards (verifiability at egress), and Evaluator (meaning). All
+  three are complementary — an Evaluator `pass` does not permit bypassing the
+  egress guards.
+- `docs/orchestration.md` §3.3: egress guards run inside the Orchestrator at the
+  `pre_egress` phase; failures revert the wave or escalate to `AWAITING_HITL`
+  with `hitl.from_state = EGRESS_CHECK` as a sub-phase of `EXECUTING`.
+- `docs/orchestration.md` §3.3.1: state-pointer pattern — the Knowledge Layer
+  holds pointers to state, not state itself; this is what makes Temporal-style
+  implementation candidates clean.
+- `docs/orchestration.md` §3.3.2: V1 implementation decision recorded —
+  agent steps are direct LLM calls *inside* Temporal-style activities, not
+  nested workflows per agent step. Temporal remains an implementation candidate
+  consistent with v0.1.2.
+- `docs/swarm-supervisor.md` §3: spawn gate widened from five to six checks with
+  a new **evidence sufficiency** check 4. A spawn that would act on or surface a
+  claim with no reachable `claim_evidence_map_ref` path is never approved.
+- `docs/swarm-supervisor.md` §4: spawn-ledger row gains optional
+  `correlation_id` and `evidence_fetch_budget` fields.
+- `docs/swarm-supervisor.md` §6: new HITL escalation trigger **Evidence
+  shortfall** for spawn-gate check 4 failures.
+- `docs/versioning.md` §3, §5: **Knowledge Layer schema** is added to the list
+  of dynamic, versionable artifacts and is pinned by the release manifest. The
+  sidecar's `schema_version` field must match the pinned version.
+- `docs/tool-plans.md` §2 (fields per entry): new per-tool fields
+  `freshness_ttl_seconds`, `is_authoritative_for[]`, and
+  `evidence_extraction_strategy` consumed by egress guards 4 and 5 and by the
+  Knowledge Layer write path.
+- `docs/tool-plans.md` §3.3: explicit relationship between the tool plan and the
+  Knowledge Layer.
+- `docs/operations.md` §1: existing log streams gain `correlation_id` and
+  `claim_evidence_map_ref` as common fields when present on the Task. The egress
+  check surfaces as `decision_kind: egress_blocked` / `egress_passed` in the
+  existing Decision log — **no sixth log stream is introduced.**
+- `docs/operations.md` §6 (new bullets): egress guard metrics broken down by
+  which of the eight guards blocked the egress; stale evidence rate; evidence
+  fetch volume vs `evidence_fetch_budget`; correlation coverage; Knowledge
+  Layer cache eviction rate.
+- `docs/v1-dogfood-scenarios.md` §2, §3: Workflows B and C updated to exercise
+  the egress guards on the proposed writes and human-surfacing outputs.
+- `docs/v1-dogfood-scenarios.md` §8: new **cross-cutting scenario 5 —
+  stale-evidence egress block** exercising guard 4 (freshness) on a cached
+  Monday.com item entry that has aged past its `freshness_ttl_seconds`.
+- `AGENTS.md` §3 glossary: **Intake**, **Knowledge Layer**, **Egress Guards**,
+  **Claim-evidence map**, **`correlation_id`**, **Freshness TTL**, **Source
+  authority**.
+- `AGENTS.md` §4 boundary table: two new rows — egress verification (owned by
+  the Egress Guards inside the Orchestrator) and evidence freshness / source
+  authority (owned by the tool plan, consumed by guards 4 and 5).
+- `AGENTS.md` §5 anti-patterns 15–19: no mid-stream sufficiency or "continuous
+  context" checks inside an LLM loop; the Knowledge Layer is not a system of
+  record; LLMs never write directly to the Knowledge Layer; intake feasibility
+  must not escalate above S-tier; an Evaluator `pass` does not permit bypassing
+  the egress guards.
+- `AGENTS.md` §6.6: three new `grep` checks — Knowledge Layer claimed as ground
+  truth; mid-stream / continuous verification or sufficiency check; LLM writes
+  directly to the Knowledge Layer.
+- `README.md` §3: new principle 9 — **LLM-first verification with deterministic
+  guards.** LLMs reason; eight deterministic guards verify at the egress
+  boundary.
+- `README.md` §4 / §5 / §6 / §7: architecture Mermaid diagram, repo map,
+  quickstart, and status updated for v0.1.3.
+
+### Changed
+- `docs/v1-dogfood-scenarios.md` header: now describes **five** cross-cutting
+  scenarios (was four). The fifth exercises the deterministic egress guards on
+  stale evidence.
+
+### Known limitations of v0.1.3
+- Still no code, schemas in a typed language, or CI.
+- The Knowledge Layer is described as cache + index + evidence-pointer; the
+  storage technology (key-value store, vector index, relational table) is left
+  to the implementation.
+- The `evidence_extraction_strategy` enum lists `passthrough | jsonpath_map |
+  schema_normalize | custom:<id>`, but no normative library of strategies is
+  shipped with this docs drop — concrete strategies belong in the implementation
+  repo.
+- Temporal remains named as an implementation candidate for both the
+  Orchestrator and the Swarm Supervisor's durable loops; no Temporal-specific
+  schema is provided here.
+- GraphQL entrypoint remains deferred; multi-region, fine-tuning, and a routine
+  marketplace remain out of scope.
+
 ## [0.1.2] — 2026-05-16
 
 Documentation patch introducing the contractual **Swarm Supervisor** and closing

@@ -101,6 +101,53 @@ A populated, illustrative budget is in
 the resolved autonomy policy says; the defaults above only apply when no policy at any
 scope sets a value.
 
+### 3.3 Egress guards inside the Orchestrator
+
+The eight deterministic **egress guards** (see
+[knowledge-layer.md §5](knowledge-layer.md)) run inside the Orchestrator, at the
+`pre_egress` policy trigger phase, before the Executor invokes the Tool Gateway and
+before any human-facing surface receives an output that asserts external facts.
+
+- The guards are **part of the Orchestrator's control loop**, not a separate
+  component. They consume the `claim_evidence_map_ref` on the Task and the
+  Knowledge Layer entries that map references.
+- A guard failure does **not** introduce a new Task lifecycle state. It either
+  reverts the wave or escalates to `AWAITING_HITL` with `hitl.from_state =
+  EGRESS_CHECK` recorded as a sub-phase of `EXECUTING`. See
+  [task-contract.md §3](task-contract.md).
+
+#### 3.3.1 State-pointer pattern
+
+The Knowledge Layer does not hold Task state. It holds **pointers** to state. When
+the Orchestrator (or a durable-workflow-engine implementation underneath it) needs
+to reason about state, it reads the pointer from the Knowledge Layer and follows
+it. This is the **state-pointer pattern**.
+
+This is what makes Temporal-style implementation candidates clean:
+
+- The durable workflow remains stateful on its own contract.
+- The Knowledge Layer hands the workflow pointers, not competing copies of the
+  state.
+- The Orchestrator stays the single writer of Task `state`; the Knowledge Layer is
+  cache + index + pointer; the systems of record are authoritative.
+
+#### 3.3.2 V1 implementation: direct LLM call inside Temporal activities
+
+**Decision (recorded for v0.1.3).** In V1, when the Orchestrator (or a Temporal-style
+implementation candidate underneath it) dispatches an agent step, the agent
+invocation is a **direct LLM call inside the Temporal-style activity**, not a
+nested workflow per agent step. Rationale:
+
+- The agent runner is stateless. The Activity owns retry/idempotency.
+- Wrapping every agent step in its own workflow inflates Temporal history and
+  fragments observability.
+- The eight egress guards and the spawn-ledger row writes are the *durable*
+  parts of the agent step; the LLM call itself is the *ephemeral* part.
+
+Temporal remains an **implementation candidate** for the Orchestrator's and Swarm
+Supervisor's durable loops, consistent with v0.1.2. This decision narrows *how*
+agent steps are run inside that loop in V1; it does not change the contract.
+
 ---
 
 ## 4. Duplicate request detection

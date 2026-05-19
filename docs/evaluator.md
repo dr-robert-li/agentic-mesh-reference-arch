@@ -99,18 +99,25 @@ A concrete proposed criterion is in [`examples/criterion.example.yaml`](../examp
 
 ---
 
-## 6. Relationship to the contract validator
+## 6. Relationship to the contract validator and egress guards
 
-| Concern | Validator | Evaluator |
-|---------|-----------|-----------|
-| Shape | yes | no |
-| Required fields present | yes | no |
-| Field values *correct in context* | no | yes |
-| Cost | very low | high (often **L** tier) |
-| Failure semantics | revert state | flag `fail` / `degraded` |
-| Runs always | yes | once per wave + once at end |
+Three checkers run on every Task. They are **complementary**, not substitutes.
 
-Both run on every Task. They are not substitutes.
+| Concern | Validator | Egress Guards | Evaluator |
+|---------|-----------|---------------|-----------|
+| What it checks | **Shape** of inputs/outputs. | **Verifiability at egress**: evidence pointers, freshness, source authority, tenancy, tier/policy, budget. | **Meaning**: did the output actually do what the user asked. |
+| Mechanism | Deterministic schema check. | Eight deterministic guards. See [knowledge-layer.md §5](knowledge-layer.md). | LLM-graded against criteria suite; usually **L** tier. |
+| Cost | Very low. | Low (deterministic). | High. |
+| Failure semantics | Revert state. | Block egress; emit `egress_blocked`; may `require_hitl`. | Flag `fail` / `degraded`. |
+| Boundary | Every transition. | The `pre_egress` trigger phase, before the Tool Gateway. | Once per wave + once at end. |
+
+The Evaluator is **not** a substitute for the egress guards. An Evaluator `pass`
+verdict does **not** permit bypassing the deterministic guards: a result can be
+meaning-correct against the criteria suite and still cite stale or non-authoritative
+evidence. Both checks must pass on their own terms.
+
+Conversely, the egress guards are not a substitute for the Evaluator. The guards
+verify that *claims are checkable*; they do not verify that *claims are right*.
 
 ---
 

@@ -63,6 +63,7 @@ The dynamic artifacts are:
 | **Criterion (suite)** | An evaluation rule. See [evaluator.md](evaluator.md). |
 | **Tool plan** | A per-tenant bundle of allowed tools, tiers, and credential aliases. See [tool-plans.md](tool-plans.md). |
 | **Prompt template** | The system/user prompts used by routines and agents. Versioned independently because prompt iteration is high-frequency. |
+| **Knowledge Layer schema** | The shape of claim-evidence sidecars and Knowledge Layer entries — including the `claims[]` shape, evidence-pointer kinds, freshness fields, and `is_authoritative_for[]` vocabulary. See [knowledge-layer.md](knowledge-layer.md). |
 
 Each is stored as a row keyed by `(artifact_id, version)` with a `status` field and an
 embedded **manifest** describing what it depends on.
@@ -242,6 +243,7 @@ A release manifest pins:
 | Routine version (if applicable) | Stable workflow. |
 | Tool plan version | Stable tool allow-list. |
 | Evaluator criteria suite version | Stable evaluation. |
+| **Knowledge Layer schema version** | Stable shape of claim-evidence sidecars, evidence pointer kinds, freshness fields, and `is_authoritative_for[]` vocabulary. A release manifest pins exactly one Knowledge Layer schema version; the schema_version field on the sidecar (e.g. `knowledge-layer/v0.1.3`) must match. |
 
 A populated example is in [`examples/release-manifest.example.yaml`](../examples/release-manifest.example.yaml).
 

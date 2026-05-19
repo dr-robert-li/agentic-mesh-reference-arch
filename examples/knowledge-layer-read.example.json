@@ -1,0 +1,42 @@
+{
+  "_comment": "Illustrative, not normative. A single read against the Knowledge Layer for monday_item:1234567890. See docs/knowledge-layer.md §2.1.",
+  "tenant_id": "tenant_acme",
+  "task_id": "task_01HXYZWORKFLOWC01",
+  "correlation_id": "corr_01HXYZ0001",
+  "release_manifest_id": "rm_2026_05_15_a",
+  "key": {
+    "source_system": "monday",
+    "source_id": "items/1234567890",
+    "content_hash": null
+  },
+  "result": {
+    "entry_id": "kl:tenant_acme:monday/items/1234567890#v17",
+    "claim": {
+      "id": "1234567890",
+      "name": "Renew customer X contract",
+      "status": "Blocked",
+      "board_id": "bd_gtm_pipeline",
+      "owner_email": "owner@example.com"
+    },
+    "evidence_pointer": {
+      "kind": "external_system",
+      "tool_id": "monday.items.fetch_with_history",
+      "lookup_key": {"item_id": "1234567890"},
+      "url": "https://example.monday.com/boards/bd_gtm_pipeline/pulses/1234567890"
+    },
+    "fetched_at": "2026-05-15T10:33:11Z",
+    "freshness": {
+      "verdict": "fresh",
+      "freshness_ttl_seconds": 900,
+      "expires_at": "2026-05-15T10:48:11Z"
+    },
+    "is_authoritative_for": [
+      "monday_item.status",
+      "monday_item.updates",
+      "monday_item.assignees"
+    ],
+    "version": 17
+  },
+  "egress_required_for_use": false,
+  "notes": "This is a read, not an egress. Using this claim to write back to Monday.com or to surface it to a human triggers the eight deterministic egress guards — see docs/knowledge-layer.md §5."
+}

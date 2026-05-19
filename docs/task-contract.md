@@ -16,6 +16,9 @@ A Task is a record with the following fields. Field names are normative; types a
 | `parent_task_id` | no | If this is a subtask, the parent. Root tasks omit this. |
 | `root_task_id` | yes | The top-level ancestor. For roots, equals `task_id`. |
 | `tenant_id` | yes | Tenant scope. Every Task belongs to exactly one tenant. |
+| `intake_id` | no | Optional reference to the intake artifact this Task was created from. See [intake.md](intake.md). |
+| `correlation_id` | no | Optional. Propagated across child Tasks, log entries, spawn-ledger rows, Knowledge Layer reads, and egress checks. See [knowledge-layer.md §8](knowledge-layer.md). |
+| `claim_evidence_map_ref` | no | Optional reference to a claim-evidence sidecar. Required at egress for any output that asserts facts about external entities. See [knowledge-layer.md §3](knowledge-layer.md). |
 | `entrypoint` | yes | One of `slack`, `api`, `mcp`, `internal` (loopback, scheduled, child task). `graphql` is reserved for a future entrypoint and **not** valid in V1. See [architecture.md §2](architecture.md). |
 | `actor` | yes | Who initiated: human user ID, agent ID, or service ID. Includes display name and source-system identifier. |
 | `goal` | yes | Natural-language intent. Preserved verbatim. |
@@ -112,8 +115,9 @@ that authorizes auto-acceptance — see [evaluator.md §4](evaluator.md) and
 1. **Single writer.** Only the Orchestrator transitions `state`. Any other writer is a bug.
 2. **Validator gate.** Before *and* after a transition, the Contract Validator checks the relevant subset of fields. Failures revert to the previous state with a Validation log entry.
 3. **Forward-only by default.** Re-entry into `EXECUTING` is allowed for retries and for the next wave; otherwise transitions are forward-only.
-4. **HITL is a pause, not a branch.** `AWAITING_HITL` can be reached from `POLICY_CHECK` (pre-execute gate) or `EVALUATING` (post-execute gate). On approve, the Task resumes to the state the gate fired from. On deny, the Task transitions to `DENIED`. The `hitl` block records `from_state` so the resume target is unambiguous.
+4. **HITL is a pause, not a branch.** `AWAITING_HITL` can be reached from `POLICY_CHECK` (pre-execute gate), `EVALUATING` (post-execute gate), or **`EGRESS_CHECK`** (pre-egress gate — when an egress guard fails with `require_hitl`; see [knowledge-layer.md §5](knowledge-layer.md) and [governance.md §6](governance.md)). On approve, the Task resumes to the state the gate fired from. On deny, the Task transitions to `DENIED`. The `hitl` block records `from_state` so the resume target is unambiguous.
 5. **Terminal states are immutable.** Once `SUCCEEDED`, `FAILED`, `DENIED`, `CANCELLED`, or `SUPPRESSED`, the Task is read-only. To "retry", create a child Task with provenance referencing the original.
+6. **Deterministic egress check is non-state-changing.** The eight deterministic egress guards (see [knowledge-layer.md §5](knowledge-layer.md)) run inside an `EXECUTING` wave and **do not** introduce a new Task lifecycle state. A guard failure either (a) reverts the wave with an `egress_blocked` Decision log entry, or (b) escalates to `AWAITING_HITL` with `hitl.from_state = EGRESS_CHECK` recorded as a sub-phase of `EXECUTING`. The set of Task `state` values is unchanged from v0.1.2.
 
 ---
 
@@ -139,6 +143,9 @@ that authorizes auto-acceptance — see [evaluator.md §4](evaluator.md) and
 | `policy_decision` | A specific policy enforcement |
 | `evaluation` | An evaluation log entry |
 | `hitl_decision` | A human decision with actor, timestamp, reason |
+| `intake` | The intake artifact this Task was created from. See [intake.md](intake.md). |
+| `evidence` | A Knowledge Layer entry or claim-evidence sidecar referenced by this Task. See [knowledge-layer.md](knowledge-layer.md). |
+| `egress_check` | A deterministic egress-check record (the eight-guard run). See [knowledge-layer.md §5](knowledge-layer.md). |
 
 This is what gives the no-frontend monitoring story (Slack/API/MCP) enough context to surface a clean "why did this happen" answer.
 

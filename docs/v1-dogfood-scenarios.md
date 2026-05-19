@@ -3,8 +3,9 @@
 V1 is proven by making the mesh work on the team that builds it. The scenarios below are
 the acceptance criteria for v0.1 of the implementing platform.
 
-There are **three workflows** and **four cross-cutting scenarios**. Each cross-cutting
-scenario must be demonstrable on top of at least one of the workflows.
+There are **three workflows** and **five cross-cutting scenarios** (the fifth was
+added in v0.1.3 to exercise the deterministic egress guards on stale evidence). Each
+cross-cutting scenario must be demonstrable on top of at least one of the workflows.
 
 ---
 
@@ -64,9 +65,19 @@ scenario must be demonstrable on top of at least one of the workflows.
 - The sheet's row count is plausible against the artifact size.
 - Header row is present and non-empty.
 
+### Egress guards
+- Before wave 3 (`sheets.create_with_data`), the Orchestrator runs the eight
+  deterministic egress guards (see [knowledge-layer.md §5](knowledge-layer.md)) on
+  the proposed write. Guards 2 (claim-evidence map), 4 (freshness), and 5
+  (source authority) verify that the source artifact pointed at by the Slack
+  message is the one being written, and that its evidence pointer is fresh.
+- Before wave 4 (`slack.reply_in_thread`), the guards re-run on the sheet link
+  itself — guard 5 confirms `drive.files` is authoritative for `sheet.id`.
+
 ### Why this scenario matters
 This is the canonical "wrong but schema-valid" failure mode: the executor reports
-*a* link; the evaluator must confirm it's *the* link.
+*a* link; the evaluator must confirm it's *the* link — and the deterministic egress
+guards must confirm the link points at evidence the mesh actually fetched.
 
 ---
 
@@ -91,9 +102,21 @@ This is the canonical "wrong but schema-valid" failure mode: the executor report
 - Every claim in the response references a real `update_id` or field change on the item.
 - The "blocked by" diagnosis matches at least one update marked as a blocker or matches the most recent state-change reason.
 
+### Egress guards
+- The agent emits a `claim_evidence_map_ref` sidecar (see
+  [`examples/claim-evidence-map.example.json`](../examples/claim-evidence-map.example.json))
+  mapping every claim to a Knowledge Layer entry sourced from
+  `monday.items.fetch_with_history`.
+- Before wave 3 (`slack.chat.postMessage`), the Orchestrator runs the eight
+  deterministic egress guards. Any stale evidence pointer fails guard 4 (freshness)
+  and the egress is blocked — the response is not posted until the evidence is
+  refetched.
+
 ### Why this scenario matters
 Demonstrates the **grounded response** pattern — the answer is checkable against
-its sources, and the evaluator enforces that the citations actually support the claims.
+its sources. The Evaluator enforces that the citations *match* the claims; the
+deterministic egress guards enforce that the citations are *resolvable, fresh, and
+sourced from systems authoritative for the predicate*.
 
 ---
 
@@ -162,9 +185,39 @@ The "false-match" path (user clicks **No, different**) is also exercised: the ne
 
 ---
 
-## 8. Acceptance summary
+## 8. Cross-cutting scenario 5 — Stale-evidence egress block
 
-A V1 implementation is accepted when all three workflows and all four cross-cutting
-scenarios can be demonstrated end-to-end with the audit chain — event, decision,
-action, validation, evaluation — fully populated, and with at least one accepted
-evaluator-proposed criterion visible in the criteria store.
+**Setup.** Workflow C is run against a Monday.com item whose Knowledge Layer entry
+was fetched 20 minutes ago. The tool plan declares `freshness_ttl_seconds: 900` for
+`monday.items.fetch_with_history` (see [tool-plans.md §3.3](tool-plans.md)), so the
+cached entry is `stale`.
+
+**Trigger.** The agent produces a grounded Slack response that cites the stale
+Knowledge Layer entry in its `claim_evidence_map_ref` sidecar.
+
+**Expected behavior.**
+
+1. Before wave 3 (`slack.chat.postMessage`), the Orchestrator runs the eight
+   deterministic egress guards (see [knowledge-layer.md §5](knowledge-layer.md)).
+2. Guard 4 (freshness) fires: the cited evidence is `stale`. The egress is blocked.
+3. A `decision_kind: egress_blocked` Decision log entry is emitted with the failing
+   guard named.
+4. The Orchestrator either (a) refetches `monday.items.fetch_with_history` through
+   the Tool Gateway, updates the Knowledge Layer entry, re-runs the guards and
+   proceeds, or (b) if `evidence_fetch_budget.max_refetches` is exhausted,
+   transitions to `AWAITING_HITL` with `hitl.from_state = EGRESS_CHECK`.
+
+**Why this scenario matters.** It exercises the *deterministic* leg of
+"LLM-first verification with deterministic guards": the LLM produced a perfectly
+formatted, evaluator-passing response; only the egress guard caught that the
+underlying evidence was stale.
+
+---
+
+## 9. Acceptance summary
+
+A V1 implementation is accepted when all three workflows and all five cross-cutting
+scenarios can be demonstrated end-to-end with the audit chain — event, decision
+(including `egress_blocked` / `egress_passed`), action, validation, evaluation —
+fully populated, and with at least one accepted evaluator-proposed criterion visible
+in the criteria store.

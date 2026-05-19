@@ -22,8 +22,9 @@ The mesh is the middle path:
 - **Governance is first-class.** Policies are persisted objects, versioned, enforced either deterministically or by an agent, and can be authored in natural language.
 - **The orchestrator is the source of truth.** State transitions live in one place; executors and agents are stateless workers.
 - **Dynamic spawning is contractual.** A **Swarm Supervisor** decides whether to expand a plan (wave-based by default; recursive within conservative depth/budget/risk limits) and writes every expansion to an append-only spawn ledger. Temporal or another durable-workflow engine is an implementation candidate for the control loop, not the agent SDK itself.
+- **LLM-first reasoning, deterministic verification at the egress boundary.** Agents reason against a tenant-scoped **Context and Evidence Knowledge Layer** (cache + index + evidence pointers — *not* a system of record). Every claim that surfaces to a human or writes to a system of record passes **eight deterministic egress guards** before the Tool Gateway is invoked: schema, claim-evidence map, evidence resolvability, freshness, source authority, tenancy, tier-and-policy, budget. Mid-stream "double-check" loops inside an LLM are forbidden — verification happens once, at the boundary, with the audit chain attached.
 - **Routines are data, not code.** Successful task patterns are captured as DB objects with manifests. Operations (`create`, `recall`, `update`, `pin`, `copy`, `deprecate`, `archive`, `prune`) are separate from version status (`draft`, `candidate`, `active`, `deprecated`, `archived`, `pruned`); pinning is a scoped binding, not a status.
-- **Evaluator catches "wrong but schema-valid".** Schemas check shape; evaluator checks meaning.
+- **Evaluator catches "wrong but schema-valid".** Schemas check shape; evaluator checks meaning; egress guards check verifiability against the system of record.
 
 ---
 
@@ -57,7 +58,8 @@ V1 does **not** include: a web UI, a public marketplace of routines, fine-tuning
 5. **Cheapest model that suffices.** Cascade from small models (classify, extract, lookup) to large models (plan, govern, evaluate, compare versions).
 6. **Credentials never reach agents.** Tools are invoked through a gateway/executor that holds credentials per tenant.
 7. **Generic core, client-specific tool packs.** The core mesh is reusable; per-client packs add Monday.com, HubSpot, etc.
-8. **Observability is non-negotiable.** Every decision, action, validation, and evaluation is logged with provenance.
+8. **Observability is non-negotiable.** Every decision, action, validation, evaluation, and egress check is logged with provenance.
+9. **LLM-first verification with deterministic guards.** LLMs do the cheap, fast reasoning. Eight deterministic guards do the expensive, checkable verification — exactly once, at the egress boundary. The Knowledge Layer caches and indexes; the systems of record stay authoritative. No mid-stream "let me double-check" loops inside an LLM.
 
 ---
 
@@ -65,16 +67,17 @@ V1 does **not** include: a web UI, a public marketplace of routines, fine-tuning
 
 ```mermaid
 flowchart TB
-    subgraph Entry["Entrypoints (V1 enum: slack | api | mcp | internal)"]
+    subgraph Entry["Entrypoints (V1 enum: slack | api | mcp | internal) + Intake"]
         SLK[Slack App]
         API[REST API<br/>source of truth]
         MCP[MCP Server<br/>external agents + loopback]
         GQL[GraphQL<br/>deferred post-V1]
+        IN[Intake<br/>canonical schema +<br/>S-tier feasibility]
     end
 
     subgraph Control["Control Plane"]
         ING[Ingress &<br/>Auth / Tenancy]
-        ORCH[Orchestrator<br/>state machine]
+        ORCH[Orchestrator<br/>state machine +<br/>8 Egress Guards]
         PLAN[Planner / Decomposer<br/>optional split]
         SS[Swarm Supervisor<br/>dynamic spawning,<br/>autonomy budgets,<br/>spawn ledger]
         GOV[Governance<br/>Policy Engine]
@@ -93,17 +96,19 @@ flowchart TB
         TASKS[(Tasks &<br/>State)]
         POL[(Policies &<br/>versions)]
         ROUT[(Routines &<br/>manifests)]
+        KL[(Context and Evidence<br/>Knowledge Layer<br/>cache + index + pointers)]
         LOGS[(Event / Decision /<br/>Action / Validation /<br/>Evaluation logs)]
     end
 
-    subgraph Ext["External Tools (per tenant tool plan)"]
+    subgraph Ext["External Tools / Systems of Record (per tenant tool plan)"]
         GW_TOOLS[Google Workspace · Slack · Monday.com · tl;dv ·<br/>HubSpot · Stripe · BigQuery · Segment · Twilio · GitHub · Jira · Notion · ...]
     end
 
-    SLK --> ING
-    MCP --> ING
-    API --> ING
-    GQL -.-> ING
+    SLK --> IN
+    MCP --> IN
+    API --> IN
+    GQL -.-> IN
+    IN --> ING
     ING --> ORCH
 
     ORCH <--> PLAN
@@ -113,11 +118,13 @@ flowchart TB
     ORCH <--> EVAL
     ORCH <--> VAL
     ORCH <--> REG
+    ORCH <--> KL
     ORCH --> EXEC
 
     EXEC --> AG
     EXEC --> GW
     GW --> GW_TOOLS
+    GW --> KL
 
     ORCH --> TASKS
     GOV --> POL
@@ -170,14 +177,16 @@ an agent SDK.
 ├── docs/
 │   ├── architecture.md             # full control-plane / execution-plane breakdown
 │   ├── task-contract.md            # the canonical Task object and its lifecycle
+│   ├── intake.md                   # canonical input contract + S-tier feasibility check
+│   ├── knowledge-layer.md          # tenant-scoped context/evidence cache + eight egress guards
 │   ├── governance.md               # policies, authoring, enforcement, HITL
 │   ├── evaluator.md                # evaluation criteria, proposal-to-accept flow
-│   ├── orchestration.md            # state transitions, retries, waves, recursion semantics, kill switch
+│   ├── orchestration.md            # state transitions, retries, waves, recursion semantics, egress guards, kill switch
 │   ├── swarm-supervisor.md         # contractual dynamic spawning, autonomy budgets, spawn ledger
 │   ├── versioning.md               # git-tagged platform vs DB-persisted routines, candidate lifecycle, release manifests
-│   ├── tool-plans.md               # tool trust tiers, credentials, per-client packs
+│   ├── tool-plans.md               # tool trust tiers, credentials, freshness TTL, source authority, per-client packs
 │   ├── v1-dogfood-scenarios.md     # the three workflows + cross-cutting scenarios
-│   └── operations.md               # logging, monitoring, GC of candidates/archives, kill switch, DLQ
+│   └── operations.md               # logging, monitoring, GC of candidates/archives, kill switch, DLQ, egress signals
 ├── examples/
 │   ├── task.example.json           # a populated Task object
 │   ├── policy.example.yaml         # a governance policy with evaluator options
@@ -189,7 +198,11 @@ an agent SDK.
 │   ├── release-manifest.example.yaml
 │   ├── tool-plan.example.yaml
 │   ├── autonomy-policy.example.yaml # conservative autonomy budget defaults
-│   └── spawn-ledger.example.json   # one row of the spawn ledger
+│   ├── spawn-ledger.example.json   # one row of the spawn ledger
+│   ├── intake.example.json         # a canonical intake artifact
+│   ├── claim-evidence-map.example.json # a claim-evidence sidecar
+│   ├── knowledge-layer-read.example.json # one read against the Knowledge Layer
+│   └── egress-check.example.json   # the eight-guard egress check record
 └── docs/proposals/                 # short proposals for cross-cutting changes
 ```
 
@@ -202,11 +215,12 @@ Read in this order if you are new:
 1. `README.md` — you are here.
 2. `docs/architecture.md` — how the pieces fit.
 3. `docs/task-contract.md` — the one object you must understand.
-4. `docs/v1-dogfood-scenarios.md` — what we are building first.
-5. `docs/governance.md`, `docs/evaluator.md` — the two layers that make this safe.
-6. `docs/orchestration.md`, `docs/swarm-supervisor.md`, `docs/versioning.md` — how it stays correct under change.
-7. `docs/tool-plans.md`, `docs/operations.md` — how it stays correct under load.
-8. `examples/` — concrete shapes.
+4. `docs/intake.md`, `docs/knowledge-layer.md` — how the input contract is formed and how claims stay verifiable.
+5. `docs/v1-dogfood-scenarios.md` — what we are building first.
+6. `docs/governance.md`, `docs/evaluator.md` — the two layers that make this safe.
+7. `docs/orchestration.md`, `docs/swarm-supervisor.md`, `docs/versioning.md` — how it stays correct under change.
+8. `docs/tool-plans.md`, `docs/operations.md` — how it stays correct under load.
+9. `examples/` — concrete shapes.
 
 For coding agents implementing the system, start at `AGENTS.md`.
 
@@ -214,7 +228,11 @@ For coding agents implementing the system, start at `AGENTS.md`.
 
 ## 7. Status
 
-This is **v0.1.2**, a documentation-only patch introducing the contractual Swarm
-Supervisor concept, wave-based dynamic spawning, recursion within conservative
-autonomy budgets, candidate-lifecycle clarifications, and GC policies for unreviewed /
-archived artifacts. No code is included. See `CHANGELOG.md`.
+This is **v0.1.3**, a documentation-only patch introducing the **Context and Evidence
+Knowledge Layer** (tenant-scoped cache + index + evidence-pointer; *not* a system of
+record), the **Intake** layer (canonical input contract + S-tier feasibility check),
+and the **eight deterministic egress guards** that run inside the Orchestrator at the
+`pre_egress` trigger phase. Adds optional `intake_id`, `correlation_id`, and
+`claim_evidence_map_ref` fields to the Task contract (no required fields, no new
+lifecycle states, no new entrypoint enum values, no new trust tiers). No code is
+included. See `CHANGELOG.md`.

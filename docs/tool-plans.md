@@ -40,6 +40,23 @@ Fields per entry:
 | `quota` | Optional per-window call quota. |
 | `policy_refs` | Policies that gate this tool. |
 | `enabled` | Boolean. Disabling here is the cheapest kill switch. |
+| `freshness_ttl_seconds` | Optional. The TTL applied to **Knowledge Layer** entries written from this tool's responses. When `now < fetched_at + freshness_ttl_seconds`, the entry is `fresh`; otherwise it is `stale`. Unset means `unknown`. See [knowledge-layer.md §2.3](knowledge-layer.md). |
+| `is_authoritative_for[]` | The list of (subject-kind, predicate) pairs this tool is authoritative for, used by egress guard 5 (source authority). E.g. `monday.items.fetch_with_history` is authoritative for `monday_item.status`, `monday_item.updates`, `monday_item.assignees`. |
+| `evidence_extraction_strategy` | Optional. How to lift the tool's response into Knowledge Layer entries: `passthrough`, `jsonpath_map`, `schema_normalize`, or `custom:<id>`. Determines the shape of the cached claim and the evidence pointer that gets written. |
+
+### 3.3 Relationship to the Knowledge Layer
+
+The tool plan is what wires a tool into the Knowledge Layer:
+
+- The Tool Gateway records every successful call in the Action log **and** writes the
+  response (transformed per `evidence_extraction_strategy`) into the Knowledge Layer
+  with the declared `freshness_ttl_seconds` and `is_authoritative_for[]`.
+- Egress guard 4 (freshness) reads `freshness_ttl_seconds` to compute the freshness
+  verdict on each cited evidence pointer.
+- Egress guard 5 (source authority) reads `is_authoritative_for[]` to verify that the
+  cited evidence's source is authoritative for the claim's predicate.
+
+See [knowledge-layer.md §5](knowledge-layer.md) for the full eight-guard egress flow.
 
 ---
 

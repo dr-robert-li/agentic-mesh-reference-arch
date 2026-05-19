@@ -10,10 +10,10 @@ The mesh has four planes:
 
 | Plane | Purpose | Key components |
 |-------|---------|----------------|
-| **Entry** | Receive intent from humans or other agents | Slack app, REST API, MCP server; GraphQL is a deferred future entrypoint |
-| **Control** | Decide *what* should happen and *whether* it is allowed | Orchestrator, Planner/Decomposer, **Swarm Supervisor**, Governance, Evaluator, Contract Validator, Routine & Release Registry |
+| **Entry** | Receive intent from humans or other agents and form the input contract | Slack app, REST API, MCP server, **Intake** (canonical schema + S-tier feasibility check); GraphQL is a deferred future entrypoint |
+| **Control** | Decide *what* should happen and *whether* it is allowed | Orchestrator (including the **Egress Guards** §3.7), Planner/Decomposer, **Swarm Supervisor**, Governance, Evaluator, Contract Validator, Routine & Release Registry |
 | **Execution** | Do the work | Executor abstraction, Agent runners (model cascade), Tool Gateway |
-| **Persistence & Telemetry** | Durable state and observability | Task store, Policy store, Routine store, Log streams |
+| **Persistence & Telemetry** | Durable state, evidence, and observability | Task store, Policy store, Routine store, **Context and Evidence Knowledge Layer**, Log streams |
 
 ```mermaid
 flowchart LR
@@ -22,9 +22,10 @@ flowchart LR
         API[REST API]
         MCP[MCP]
         GQL[GraphQL<br/>deferred post-V1]
+        IN[Intake<br/>canonical schema +<br/>S-tier feasibility]
     end
     subgraph Control
-        ORCH[Orchestrator]
+        ORCH[Orchestrator<br/>incl. Egress Guards]
         PLAN[Planner]
         SS[Swarm Supervisor]
         GOV[Governance]
@@ -41,10 +42,15 @@ flowchart LR
         T[(Tasks)]
         P[(Policies)]
         R[(Routines)]
+        KL[(Knowledge Layer<br/>cache + index +<br/>evidence pointers)]
         L[(Logs)]
     end
 
-    Entry --> ORCH
+    SLK --> IN
+    API --> IN
+    MCP --> IN
+    GQL -.-> IN
+    IN --> ORCH
     ORCH <--> PLAN
     ORCH <--> SS
     SS <--> GOV
@@ -53,8 +59,10 @@ flowchart LR
     ORCH --> EXEC
     ORCH <--> EVAL
     ORCH <--> REG
+    ORCH <--> KL
     EXEC --> AG
     EXEC --> GW
+    GW --> KL
     ORCH --> T
     GOV --> P
     REG --> R
@@ -89,7 +97,18 @@ slack | api | mcp | internal
 
 In V1 documentation, examples, and code, `graphql` is **not** a legal value of `entrypoint`. Adding it requires the docs-update workflow in [AGENTS.md](../AGENTS.md).
 
-Every entrypoint normalizes its input into a Task (or operation against a Task) and hands it to the Orchestrator.
+Every entrypoint normalizes its input through **Intake** into a canonical artifact
+before the Orchestrator creates a Task.
+
+### 2.3 Intake
+
+Intake is the thin layer between an entrypoint and the Orchestrator. It produces a
+canonical input contract and runs a cheap **S-tier feasibility check**. It does not
+write Task state, consult governance, or invoke tools. See [intake.md](intake.md).
+
+The feasibility check returns `feasible`, `ambiguous`, or `infeasible` and **must not
+silently escalate above the S tier**. Ambiguous requests get one disambiguating
+question on the originating surface.
 
 ---
 
@@ -156,6 +175,19 @@ See [evaluator.md](evaluator.md).
 
 See [versioning.md](versioning.md).
 
+### 3.7 Egress Guards (inside the Orchestrator)
+- Eight **deterministic** guards that every proposed egress passes before the Tool
+  Gateway is invoked or a human-facing output is surfaced.
+- Guards in order: schema, claim-evidence map, evidence resolvability, freshness,
+  source authority, tenancy, tier-and-policy, budget.
+- None of the guards invokes an LLM. The Evaluator (meaning) and Contract Validator
+  (shape) remain unchanged; the egress guards are a third, deterministic boundary
+  that runs at the **`pre_egress`** trigger phase (see [governance.md §2.1](governance.md)).
+- A failing guard emits a `decision_kind: egress_blocked` Decision log entry and may
+  trigger `require_hitl` per the active policy.
+
+See [knowledge-layer.md §5](knowledge-layer.md).
+
 ---
 
 ## 4. Execution plane
@@ -183,6 +215,18 @@ The runner records which tier was used and why, so cost and quality can be audit
 ---
 
 ## 5. Persistence & telemetry
+
+### 5.1 Context and Evidence Knowledge Layer
+
+A tenant-scoped cache, index, and **evidence-pointer** layer that grounds agent
+reasoning in checkable references. **It is not a system of record** — ground truth
+remains in the source systems (Monday.com, Drive, Slack, HubSpot, Stripe, BigQuery,
+tl;dv, etc.). LLM agents never write to it directly; writes are a byproduct of tool
+calls that passed the eight deterministic egress guards (§3.7).
+
+See [knowledge-layer.md](knowledge-layer.md).
+
+### 5.2 Log streams
 
 Five log streams. Together they form the audit chain:
 
@@ -214,27 +258,34 @@ Each entry carries: `tenant_id`, `task_id`, `actor`, `entrypoint`, `timestamp`, 
 sequenceDiagram
     participant U as User (Slack)
     participant E as Entrypoint
+    participant I as Intake
     participant O as Orchestrator
     participant G as Governance
     participant P as Planner
+    participant EG as Egress Guards
     participant X as Executor
-    participant V as Validator
+    participant K as Knowledge Layer
     participant Ev as Evaluator
     participant L as Logs
 
     U->>E: /mesh do X
-    E->>O: create Task(goal=X)
+    E->>I: normalize + S-tier feasibility
+    I-->>E: feasible | ambiguous | infeasible
+    E->>O: create Task(intake_id, correlation_id)
     O->>L: event: task_created
     O->>G: precheck(policies)
     G-->>O: allow / require_hitl / deny
     O->>P: plan(Task)
     P-->>O: plan{subtasks, tools}
-    O->>V: validate(plan)
     O->>X: dispatch wave 1
-    X-->>O: results
+    X->>K: read evidence (cached/indexed)
+    K-->>X: claim + pointer + freshness
+    X-->>O: results + claim_evidence_map_ref
+    O->>EG: run 8 deterministic guards
+    EG-->>O: pass | egress_blocked
     O->>Ev: evaluate(results)
     Ev-->>O: pass / fail / proposed_criteria
-    O->>L: decision, action, validation, evaluation
+    O->>L: decision, action, validation, evaluation, egress_check
     O-->>E: final result
     E-->>U: response
 ```

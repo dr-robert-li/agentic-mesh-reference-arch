@@ -57,6 +57,13 @@ A single policy can declare multiple `triggers`. `pre_tool_call` and `pre_egress
 two most common gates that fire `require_hitl`; `post_evaluation` is where policies
 that depend on evaluator verdicts (or that auto-accept evaluator criteria) attach.
 
+The **`pre_egress`** trigger phase is where the eight deterministic **egress guards**
+(see [knowledge-layer.md §5](knowledge-layer.md)) run. The guards run *before* any
+agentic `pre_egress` policy: cheap deterministic checks first, expensive agentic
+enforcement only on near-misses. A failing deterministic guard surfaces as a
+`decision_kind: egress_blocked` Decision log entry and, depending on the guard, may
+trigger `require_hitl` via the same flow described in §6.
+
 ---
 
 ## 3. Deterministic vs agentic enforcement
@@ -105,11 +112,14 @@ stateDiagram-v2
 
 When `on_violation = require_hitl`:
 
-1. Orchestrator transitions the Task to `AWAITING_HITL`, recording `hitl.from_state` (the state the gate fired from — typically `POLICY_CHECK` or `EVALUATING`).
+1. Orchestrator transitions the Task to `AWAITING_HITL`, recording `hitl.from_state` (the state the gate fired from — `POLICY_CHECK`, `EVALUATING`, or **`EGRESS_CHECK`** when a deterministic egress guard or an agentic `pre_egress` policy escalates; see [knowledge-layer.md §5](knowledge-layer.md)).
 2. A notification is sent to the policy's configured channel (Slack channel, API webhook, MCP subscriber).
 3. The notification carries: actor, entrypoint, timestamp, policy ID + version, reason, and a **recommended action**.
 4. An approver responds via the same channel; the response becomes a `hitl_decision` provenance entry.
-5. On **approve**: Orchestrator resumes the Task to `hitl.from_state`. On **deny**: Orchestrator transitions the Task to `DENIED`.
+5. On **approve**: Orchestrator resumes the Task to `hitl.from_state`. For `EGRESS_CHECK`, resume re-runs the failing guard (and any deterministic guards after it) before the Tool Gateway is invoked. On **deny**: Orchestrator transitions the Task to `DENIED`.
+
+`EGRESS_CHECK` is a sub-phase of `EXECUTING`, not a new top-level Task state — see
+[task-contract.md §3](task-contract.md) transition rule 6.
 
 A concrete decision record is in [`examples/hitl-decision.example.json`](../examples/hitl-decision.example.json).
 
@@ -180,6 +190,7 @@ policy (same fields as §1) whose `rule` carries an `autonomy_budget` block.
 | `external_write_tier_limit` | The highest trust tier (set-membership ceiling) the supervisor may spawn into without HITL — e.g. `{read_safe, read_sensitive, write_revocable}`. |
 | `auto_candidate_creation_allowed` | Whether the supervisor may persist a candidate routine/criterion at the end of a successful expansion without HITL. Defaults to `true` for low-risk routines; review remains non-blocking (see [versioning.md §4.3](versioning.md)). |
 | `min_confidence_to_spawn` | Minimum self-reported confidence required from the spawning agent before the supervisor will dispatch the child. |
+| `evidence_fetch_budget` | Caps on Knowledge Layer reads, refetches against systems of record, and mid-stream stale-acceptance count. Three sub-fields: `max_reads`, `max_refetches`, `max_stale_acceptance`. Egress guard 8 (budget) fails when a proposed call would breach any of them. See [knowledge-layer.md §7](knowledge-layer.md). |
 
 Autonomy policies can **lower or raise** any limit by any of these scopes:
 

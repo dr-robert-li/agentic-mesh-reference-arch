@@ -15,7 +15,7 @@ a frontend in V1, and how cost/quality are managed via the model cascade.
 | **Validation** | Contract Validator runs | `tenant_id`, `task_id`, `wave_index`, `verdict`, `failures[]`, `timestamp` |
 | **Evaluation** | Evaluator outputs and criteria activity | `tenant_id`, `task_id`, `criteria_version`, `verdict`, `proposed_criteria[]`, `model_tier`, `timestamp` |
 
-Common fields across all logs: `entry_id` (ULID), `prev_entry_id` (forms a per-Task chain), `recommended_action` where applicable.
+Common fields across all logs: `entry_id` (ULID), `prev_entry_id` (forms a per-Task chain), `recommended_action` where applicable, and (added in v0.1.3) **`correlation_id`** and **`claim_evidence_map_ref`** when present on the Task. These two fields are written across all five existing log streams — **no sixth log stream is introduced.** The egress check itself surfaces as a `decision_kind: egress_blocked` or `egress_passed` entry in the existing Decision log.
 
 One sample line from each stream is in [`examples/logs.example.json`](../examples/logs.example.json).
 
@@ -156,6 +156,27 @@ The minimum operational telemetry to track:
   (human, planner, evaluator, supervisor).
 - **Archive growth rate** — items moved to `archived` per day; the share that came
   from "unreviewed past TTL" vs explicit rejection.
+
+**Knowledge Layer and egress signals** (added in v0.1.3):
+
+- **Egress guard metrics** — pass / block counts per Task and per tenant, broken
+  down by which of the eight guards (schema, claim-evidence map, evidence
+  resolvability, freshness, source authority, tenancy, tier-and-policy, budget)
+  blocked the egress. See [knowledge-layer.md §5](knowledge-layer.md).
+- **Stale evidence rate** — share of Knowledge Layer reads returning
+  `freshness: stale`, per tenant, per tool, per day.
+- **Evidence fetch volume** — counts of Knowledge Layer reads and refetches against
+  systems of record, broken down by tool. Compared against the active
+  `evidence_fetch_budget` (see [governance.md §8](governance.md)).
+- **Correlation coverage** — share of Tasks (and downstream log entries) that carry
+  a `correlation_id`. A drop in coverage indicates an entrypoint or component that
+  is failing to propagate the field.
+- **Knowledge Layer cache eviction** — eviction rate per tenant, broken down by
+  reason (TTL expiry vs explicit invalidate vs capacity).
+
+These signals are surfaced via the existing five log streams plus new
+`decision_kind` values (`egress_blocked`, `egress_passed`) — no sixth log stream is
+introduced.
 
 In V1 these are exposed as API endpoints returning JSON. Dashboards belong to a later milestone.
 
