@@ -165,6 +165,28 @@ Temporal (or any other durable-workflow engine) is a reasonable **implementation
 candidate** for the supervisor's control loop. The supervisor itself is a contract, not
 an agent SDK.
 
+### 4.2 Edge security/governance layer vs mesh execution layer
+
+The reference architecture deliberately separates two concerns and defines the
+**edge control contract** between them. The mesh does not absorb all enterprise
+edge responsibilities; instead it specifies the expected contracts and enforces
+mesh-native controls as defense-in-depth.
+
+- **Edge layer (ingress/egress security and governance).** Responsible for
+  identity binding, ingress normalization, egress normalization, policy
+  preflight, safety / DLP / classification, approval UX, and the audit
+  envelope wrapping requests and responses crossing the trust boundary.
+- **Mesh layer (execution).** Responsible for task decomposition, orchestration,
+  durable execution, the Context and Evidence Knowledge Layer, swarm
+  supervision, routines and candidate versions, evaluator and the eight egress
+  guards, and tool execution coordination through the gateway.
+
+[Floodplain](https://github.com/SirFreud/floodplain/tree/rli-0.01) is one
+possible implementation of the edge control contract — it is referenced as an
+example, not a required dependency. Any component that satisfies the contract
+(identity binding, ingress/egress normalization, policy preflight, safety/DLP,
+approval UX, audit envelope) can sit at the edge in front of the mesh.
+
 ---
 
 ## 5. Repository map
